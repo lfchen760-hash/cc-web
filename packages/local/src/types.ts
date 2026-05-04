@@ -17,6 +17,8 @@ export interface SessionInfo {
   sessionId: string;
   projectId: string;
   projectPath: string;
+  model?: string;
+  permissionMode?: string;
   summary: string;
   status: 'idle' | 'running' | 'error';
   messageCount: number;

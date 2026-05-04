@@ -52,6 +52,20 @@ export interface ProcessingContext {
     toolUseId: string,
   ) => void;
   onAbortRequest?: () => void;
+  onPermissionDenied?: (
+    denials: Array<{
+      tool_name: string;
+      tool_use_id: string;
+      tool_input: Record<string, unknown>;
+    }>,
+  ) => void;
+  onTaskProgress?: (progress: {
+    description: string;
+    totalTokens: number;
+    toolUses: number;
+    durationMs: number;
+    lastToolName: string;
+  }) => void;
 }
 
 /**
@@ -396,6 +410,18 @@ export class UnifiedMessageProcessor {
   ): void {
     const timestamp = options.timestamp || Date.now();
 
+    // 仅在整体回复失败时才触发权限确认（is_error=true 表示 Claude 未能完成任务）
+    // 多轮 tool use 中某次被拒但后续成功的情况（is_error=false）不需要弹窗
+    const isError = (message as Record<string, unknown>).is_error as boolean | undefined;
+    if (isError) {
+      const denials = (message as Record<string, unknown>).permission_denials as
+        | Array<{ tool_name: string; tool_use_id: string; tool_input: Record<string, unknown> }>
+        | undefined;
+      if (denials && denials.length > 0 && context.onPermissionDenied) {
+        context.onPermissionDenied(denials);
+      }
+    }
+
     // 如果 result 字段有文本内容，且未被流式 assistant 展示过，
     // 则作为 assistant ChatMessage 显示（Claude Code CLI 对多轮 tool use
     // 不通过 assistant 流返回最终文本，而是放在 result 的 result 字段）
@@ -446,10 +472,12 @@ export class UnifiedMessageProcessor {
 
     const messageContent = message.message.content;
 
+    // 流式模式下前端已在 handleSendMessage 中添加了用户消息，跳过 echo 避免重复
+    if (options.isStreaming) return messages;
+
     if (Array.isArray(messageContent)) {
       for (const contentItem of messageContent) {
         if (contentItem.type === "tool_result") {
-          // Extract toolUseResult from message if it exists
           const toolUseResult = (message as { toolUseResult?: unknown })
             .toolUseResult;
           this.processToolResult(
@@ -459,7 +487,6 @@ export class UnifiedMessageProcessor {
             toolUseResult,
           );
         } else if (contentItem.type === "text") {
-          // Regular text content
           const userMessage: ChatMessage = {
             type: "chat",
             role: "user",
@@ -470,7 +497,6 @@ export class UnifiedMessageProcessor {
         }
       }
     } else if (typeof messageContent === "string") {
-      // Simple string content
       const userMessage: ChatMessage = {
         type: "chat",
         role: "user",

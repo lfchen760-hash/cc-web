@@ -10,12 +10,16 @@ interface Session {
   sessionId: string;
   projectId: string;
   projectPath: string;
+  model?: string;
+  permissionMode?: string;
   summary: string;
   status: 'idle' | 'running' | 'error';
   messages: StreamResponse[];
   runner: SessionRunner | null;
   createdAt: number;
   claudeSessionId?: string;
+  seenUuids?: Set<string>;
+  lastUserText?: string;
 }
 
 const sessions = new Map<string, Session>();
@@ -103,13 +107,15 @@ export function deleteProject(projectId: string): boolean {
 
 // ─── Session API ──────────────────────────────────────────
 
-export function createSession(projectId: string, projectPath: string): SessionInfo {
+export function createSession(projectId: string, projectPath: string, model?: string, permissionMode?: string): SessionInfo {
   const sessionId = randomUUID();
   const row = db.createSession(sessionId, projectId);
   const session: Session = {
     sessionId,
     projectId,
     projectPath,
+    model,
+    permissionMode,
     summary: '',
     status: 'idle',
     messages: [],
@@ -121,6 +127,8 @@ export function createSession(projectId: string, projectPath: string): SessionIn
     sessionId,
     projectId,
     projectPath,
+    model,
+    permissionMode,
     summary: '',
     status: 'idle',
     messageCount: 0,
@@ -139,6 +147,8 @@ export function getSessionInfo(sessionId: string): SessionInfo | undefined {
     sessionId: session.sessionId,
     projectId: session.projectId,
     projectPath: session.projectPath,
+    model: session.model,
+    permissionMode: session.permissionMode,
     summary: session.summary,
     status: session.status,
     messageCount: session.messages.length,
@@ -156,6 +166,8 @@ export function listSessions(projectId?: string): SessionInfo[] {
       sessionId: r.id,
       projectId: r.project_id,
       projectPath,
+      model: mem?.model,
+      permissionMode: mem?.permissionMode,
       summary: r.summary,
       status: (r.status as 'idle' | 'running' | 'error'),
       messageCount: r.message_count,
@@ -201,6 +213,57 @@ export function generateSummary(sessionId: string, text: string): void {
   db.updateSessionSummary(sessionId, summary);
 }
 
+/** 创建 SessionRunner 并附加 UUID 去重逻辑（用于 --resume 重放时跳过旧消息） */
+function createRunner(session: Session): SessionRunner {
+  if (!session.seenUuids) session.seenUuids = new Set();
+
+  const controller = new AbortController();
+  return new SessionRunner({
+    claudeSessionId: session.claudeSessionId,
+    projectPath: session.projectPath,
+    model: session.model,
+    permissionMode: session.permissionMode || "acceptEdits",
+    signal: controller.signal,
+    onMessage: (resp) => {
+      // UUID 去重：--resume 重放的消息不重复转发到前端
+      const data = (resp as unknown as Record<string, unknown>).data as Record<string, unknown> | undefined;
+      const uuid = data?.uuid as string | undefined;
+      if (uuid && session.seenUuids) {
+        if (session.seenUuids.has(uuid)) return; // 旧消息，跳过
+        session.seenUuids.add(uuid);
+      }
+
+      // 存入历史
+      session.messages.push(resp);
+
+      // 捕获 Claude session_id（首次 init 消息返回）
+      if (!session.claudeSessionId) {
+        const sid = isSdkInit(resp);
+        if (sid) {
+          session.claudeSessionId = sid;
+          db.updateSessionClaudeId(session.sessionId, sid);
+        }
+      }
+
+      // 发送到中转（附加 sessionId）
+      if (isConnected()) {
+        send({ ...resp, sessionId: session.sessionId });
+      }
+
+      // 当收到 result 时，本轮对话结束
+      if (isSdkResult(resp)) {
+        session.status = "idle";
+        db.updateSessionStatus(session.sessionId, "idle");
+        db.incrementMessageCount(session.sessionId);
+        if (isConnected()) {
+          send({ type: "done", sessionId: session.sessionId });
+        }
+        saveMessages(session);
+      }
+    },
+  });
+}
+
 export function sendMessage(
   sessionId: string,
   text: string,
@@ -208,49 +271,17 @@ export function sendMessage(
   const session = sessions.get(sessionId);
   if (!session) return false;
 
-  session.status = 'running';
-  db.updateSessionStatus(sessionId, 'running');
+  session.status = "running";
+  db.updateSessionStatus(sessionId, "running");
 
   // 如果还没有 runner，创建并启动
   if (!session.runner) {
-    const controller = new AbortController();
-    const runner = new SessionRunner({
-      claudeSessionId: session.claudeSessionId,
-      projectPath: session.projectPath,
-      signal: controller.signal,
-      onMessage: (resp) => {
-        // 存入历史
-        session.messages.push(resp);
-
-        // 捕获 Claude session_id（首次 init 消息返回）
-        if (!session.claudeSessionId) {
-          const sid = isSdkInit(resp);
-          if (sid) {
-            session.claudeSessionId = sid;
-            db.updateSessionClaudeId(sessionId, sid);
-          }
-        }
-
-        // 发送到中转（附加 sessionId）
-        if (isConnected()) {
-          send({ ...resp, sessionId });
-        }
-
-        // 当收到 result 时，本轮对话结束
-        if (isSdkResult(resp)) {
-          session.status = 'idle';
-          db.updateSessionStatus(sessionId, 'idle');
-          db.incrementMessageCount(sessionId);
-          if (isConnected()) {
-            send({ type: 'done', sessionId });
-          }
-          saveMessages(session);
-        }
-      },
-    });
-    runner.start();
-    session.runner = runner;
+    session.runner = createRunner(session);
+    session.runner.start();
   }
+
+  // 记住最后一条用户消息（权限重试时用于重发）
+  session.lastUserText = text;
 
   // 发送用户消息到持久进程的 stdin
   const ok = session.runner.send(text);
@@ -261,6 +292,65 @@ export function sendMessage(
       send({ type: 'error', sessionId, error: 'Claude CLI 进程异常' });
     }
     return false;
+  }
+
+  return true;
+}
+
+/** 更新会话的权限模式，如果当前有 runner 则关闭它（下次消息用新模式重启） */
+export function updatePermissionMode(sessionId: string, mode: string): void {
+  const session = sessions.get(sessionId);
+  if (!session) return;
+  const oldMode = session.permissionMode;
+  session.permissionMode = mode;
+  // 权限模式变了，关闭当前 runner 让新模式下条消息时重启
+  if (oldMode !== mode && session.runner) {
+    session.runner.close();
+    session.runner = null;
+    session.status = "idle";
+  }
+}
+
+/** 权限批准后重试：移除被拒回复，用新权限模式重启 CLI 并重放对话 */
+export function retryWithPermission(sessionId: string, permissionMode: string): boolean {
+  const session = sessions.get(sessionId);
+  if (!session) return false;
+
+  // 1. 移除最后一条被拒绝的回复（从末尾直到遇到 user 消息为止）
+  const msgs = session.messages;
+  let lastUuid: string | undefined;
+  while (msgs.length > 0) {
+    const last = msgs[msgs.length - 1];
+    const data = (last as unknown as Record<string, unknown>).data as Record<string, unknown> | undefined;
+    if (data?.type === "user") break;
+    lastUuid = (data as unknown as Record<string, unknown>)?.uuid as string | undefined;
+    msgs.pop();
+  }
+
+  // 2. 更新权限模式
+  session.permissionMode = permissionMode;
+
+  // 3. 关闭当前 runner
+  if (session.runner) {
+    session.runner.close();
+    session.runner = null;
+  }
+  session.status = "idle";
+
+  // 4. 清空 seenUuids（新进程会重新发送）
+  session.seenUuids = new Set();
+
+  // 5. 立即创建新 runner，用 --resume 重放对话，然后重发用户消息
+  const runner = createRunner(session);
+  runner.start();
+  session.runner = runner;
+  session.status = "running";
+  db.updateSessionStatus(sessionId, "running");
+
+  // --resume 重放完毕后 CLI 等待 stdin，在 start 之后立即发送即可
+  const retryText = session.lastUserText;
+  if (retryText) {
+    runner.send(retryText);
   }
 
   return true;

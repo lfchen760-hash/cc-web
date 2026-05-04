@@ -3,6 +3,8 @@ import {
   createSession,
   sendMessage,
   stopSession,
+  retryWithPermission,
+  updatePermissionMode,
   listSessions,
   getHistory,
   generateSummary,
@@ -32,7 +34,12 @@ onMessage((msg) => {
     case 'chat': {
       const sessionId = msg.sessionId as string | undefined;
       const text = msg.text as string | undefined;
+      const permMode = msg.permissionMode as string | undefined;
       if (!sessionId || !text) return;
+      // 同步前端设置的权限模式
+      if (permMode) {
+        updatePermissionMode(sessionId, permMode);
+      }
       console.log(`收到消息 [${sessionId.substring(0, 8)}]: ${text.substring(0, 50)}...`);
       generateSummary(sessionId, text);
       const ok = sendMessage(sessionId, text);
@@ -79,15 +86,24 @@ onMessage((msg) => {
     case 'create_session': {
       const projectId = (msg.projectId as string) || '';
       const projectPath = (msg.projectPath as string) || process.cwd();
+      const model = (msg.model as string) || undefined;
+      const permissionMode = (msg.permissionMode as string) || undefined;
       if (!projectId) {
         reply({ type: 'error', error: '创建会话需要指定 projectId' });
         return;
       }
-      const info = createSession(projectId, projectPath);
-      console.log(`会话已创建: ${info.sessionId.substring(0, 8)} (${projectPath})`);
+      const info = createSession(projectId, projectPath, model, permissionMode);
+      console.log(`会话已创建: ${info.sessionId.substring(0, 8)} (${projectPath})${model ? `, 模型=${model}` : ""}${permissionMode ? `, 权限=${permissionMode}` : ""}`);
       send({ type: 'session_info', ...info });
       const projects = listProjects();
       send({ type: 'projects_list', projects });
+      break;
+    }
+
+    case 'retry_with_permission': {
+      const sid = msg.sessionId as string;
+      const permMode = (msg.permissionMode as string) || "bypassPermissions";
+      if (sid) retryWithPermission(sid, permMode);
       break;
     }
 

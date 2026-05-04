@@ -1,3 +1,4 @@
-// 开发环境连接本地 relay，生产环境连接公网 relay
+// 自动检测：使用当前页面的 hostname，手机访问时也能正确连接
+const host = window.location.hostname;
 export const WS_BROWSER_URL =
-  import.meta.env.VITE_WS_URL || "ws://localhost:3001/ws/browser";
+  import.meta.env.VITE_WS_URL || `ws://${host}:3001/ws/browser`;

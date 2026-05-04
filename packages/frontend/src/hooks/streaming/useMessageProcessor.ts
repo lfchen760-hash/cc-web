@@ -17,7 +17,15 @@ export interface StreamingContext {
     toolUseId: string,
   ) => void;
   onAbortRequest?: () => void;
-  onTokenUsage?: (usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number; costUSD: number; contextWindow: number }) => void;
+  onTokenUsage?: (usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheCreationTokens: number; costUSD: number; contextWindow: number }) => void;
+  onPermissionDenied?: (denials: Array<{ tool_name: string; tool_use_id: string; tool_input: Record<string, unknown> }>) => void;
+  onTaskProgress?: (progress: {
+    description: string;
+    totalTokens: number;
+    toolUses: number;
+    durationMs: number;
+    lastToolName: string;
+  }) => void;
   onModel?: (model: string) => void;
 }
 

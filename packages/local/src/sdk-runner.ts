@@ -32,6 +32,8 @@ function resolveClaudeBin(): string {
 export interface SessionRunnerOptions {
   claudeSessionId?: string;
   projectPath: string;
+  model?: string;
+  permissionMode?: string;
   signal: AbortSignal;
   onMessage: (resp: StreamResponse) => void;
 }
@@ -54,7 +56,7 @@ export class SessionRunner {
 
   /** 启动 Claude CLI 交互进程 */
   start(): void {
-    const { claudeSessionId, projectPath, signal, onMessage } = this.options;
+    const { claudeSessionId, projectPath, model, permissionMode, signal, onMessage } = this.options;
 
     const args = [
       '--print',
@@ -62,6 +64,12 @@ export class SessionRunner {
       '--output-format', 'stream-json',
       '--verbose',
     ];
+    if (model) {
+      args.push('--model', model);
+    }
+    if (permissionMode) {
+      args.push('--permission-mode', permissionMode);
+    }
     if (claudeSessionId) {
       args.push('--resume', claudeSessionId);
     }

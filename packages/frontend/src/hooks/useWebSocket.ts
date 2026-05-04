@@ -3,7 +3,6 @@ import { WS_BROWSER_URL } from "../config/ws";
 
 interface UseWebSocketReturn {
   connected: boolean;
-  lastMessage: string | null;
   send: (data: unknown) => void;
   onRawMessage: (cb: (raw: string) => void) => void;
 }
@@ -16,7 +15,6 @@ export function useWebSocket(): UseWebSocketReturn {
   const rawMessageCb = useRef<((raw: string) => void) | null>(null);
 
   const [connected, setConnected] = useState(false);
-  const [lastMessage, setLastMessage] = useState<string | null>(null);
 
   const onRawMessage = useCallback((cb: (raw: string) => void) => {
     rawMessageCb.current = cb;
@@ -37,11 +35,7 @@ export function useWebSocket(): UseWebSocketReturn {
     ws.onmessage = (event) => {
       if (!mounted.current) return;
       const raw = event.data as string;
-      // 直接回调，不经过 React 状态批量更新
-      if (rawMessageCb.current) {
-        rawMessageCb.current(raw);
-      }
-      setLastMessage(raw);
+      rawMessageCb.current?.(raw);
     };
 
     ws.onclose = () => {
@@ -88,5 +82,5 @@ export function useWebSocket(): UseWebSocketReturn {
     };
   }, [connect]);
 
-  return { connected, lastMessage, send, onRawMessage };
+  return { connected, send, onRawMessage };
 }

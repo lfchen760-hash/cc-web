@@ -12,6 +12,9 @@ interface ProjectSidebarProps {
   onCreateSession: (projectId: string, projectPath: string) => void;
   onDeleteProject: (projectId: string) => void;
   onStopSession: (sessionId: string) => void;
+  isOpen: boolean;
+  isMobile: boolean;
+  onClose: () => void;
 }
 
 function statusColor(status: string) {
@@ -36,6 +39,9 @@ export function ProjectSidebar({
   onCreateSession,
   onDeleteProject,
   onStopSession,
+  isOpen,
+  isMobile,
+  onClose,
 }: ProjectSidebarProps) {
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
 
@@ -62,12 +68,16 @@ export function ProjectSidebar({
 
   const handleCreateSession = (project: ProjectInfo) => {
     onCreateSession(project.projectId, project.path);
-    // 自动展开该项目
     setExpandedProjects((prev) => {
       const next = new Set(prev);
       next.add(project.projectId);
       return next;
     });
+  };
+
+  const handleSelectSession = (sessionId: string, projectId: string) => {
+    onSelectSession(sessionId, projectId);
+    if (isMobile) onClose();
   };
 
   const getSessionsForProject = (projectId: string): SessionInfo[] => {
@@ -76,12 +86,20 @@ export function ProjectSidebar({
       .sort((a, b) => b.createdAt - a.createdAt);
   };
 
-  return (
-    <div className="w-[300px] flex-shrink-0 bg-white/80 dark:bg-slate-800/80 border-r border-slate-200 dark:border-slate-700 flex flex-col h-full rounded-l-2xl">
-      <div className="p-4 border-b border-slate-200 dark:border-slate-700">
+  const sidebarContent = (
+    <div className="h-full flex flex-col bg-white/80 dark:bg-slate-800/80 border-r border-slate-200 dark:border-slate-700">
+      <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
         <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">
           项目列表
         </h2>
+        {isMobile && (
+          <button
+            onClick={onClose}
+            className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+          >
+            ✕
+          </button>
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto p-2">
@@ -96,7 +114,6 @@ export function ProjectSidebar({
 
             return (
               <div key={project.projectId} className="mb-1">
-                {/* 项目头部 */}
                 <div
                   onClick={() => toggleProject(project.projectId)}
                   className={`flex items-center gap-2 p-2.5 rounded-lg cursor-pointer transition-colors ${
@@ -138,7 +155,6 @@ export function ProjectSidebar({
                   </button>
                 </div>
 
-                {/* 会话列表（展开时显示） */}
                 {isExpanded && (
                   <div className="ml-6 border-l border-slate-200 dark:border-slate-700">
                     {projectSessions.length === 0 ? (
@@ -149,7 +165,7 @@ export function ProjectSidebar({
                       projectSessions.map((s) => (
                         <div
                           key={s.sessionId}
-                          onClick={() => onSelectSession(s.sessionId, project.projectId)}
+                          onClick={() => handleSelectSession(s.sessionId, project.projectId)}
                           className={`ml-1 mb-0.5 p-2.5 rounded-lg cursor-pointer transition-colors ${
                             activeSessionId === s.sessionId
                               ? "bg-blue-100 dark:bg-blue-800/40 border border-blue-300 dark:border-blue-600"
@@ -194,7 +210,6 @@ export function ProjectSidebar({
         )}
       </div>
 
-      {/* 底部新建项目按钮 */}
       <div className="p-3 border-t border-slate-200 dark:border-slate-700">
         <button
           onClick={handleCreateProject}
@@ -202,6 +217,40 @@ export function ProjectSidebar({
         >
           + 新建项目
         </button>
+      </div>
+    </div>
+  );
+
+  if (isMobile) {
+    return (
+      <>
+        {/* Backdrop */}
+        <div
+          className={`fixed inset-0 bg-black/40 z-30 transition-opacity duration-300 ${
+            isOpen ? "opacity-100" : "opacity-0 pointer-events-none"
+          }`}
+          onClick={onClose}
+        />
+        {/* Drawer */}
+        <div
+          className={`fixed inset-y-0 left-0 z-40 w-[300px] transition-transform duration-300 ease-in-out ${
+            isOpen ? "translate-x-0" : "-translate-x-full"
+          }`}
+        >
+          {sidebarContent}
+        </div>
+      </>
+    );
+  }
+
+  return (
+    <div
+      className={`flex-shrink-0 overflow-hidden transition-[width] duration-300 ease-in-out ${
+        isOpen ? "w-[300px]" : "w-0"
+      }`}
+    >
+      <div className="w-[300px] h-full">
+        {sidebarContent}
       </div>
     </div>
   );

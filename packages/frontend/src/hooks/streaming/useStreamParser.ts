@@ -45,6 +45,8 @@ export function useStreamParser() {
         // Permission/Error handling
         onPermissionError: context.onPermissionError,
         onAbortRequest: context.onAbortRequest,
+        onPermissionDenied: context.onPermissionDenied,
+        onTaskProgress: context.onTaskProgress,
       };
     },
     [],
@@ -64,6 +66,16 @@ export function useStreamParser() {
           if (claudeData.subtype === "init" && claudeData.model) {
             context.onModel?.(claudeData.model);
           }
+          if ((claudeData as Record<string, unknown>).subtype === "task_progress" && (claudeData as Record<string, unknown>).usage && (claudeData as Record<string, unknown>).last_tool_name) {
+            const t = claudeData as Record<string, unknown>;
+            context.onTaskProgress?.({
+              description: (t.description as string) || "",
+              totalTokens: (t.usage as Record<string, number>).total_tokens || 0,
+              toolUses: (t.usage as Record<string, number>).tool_uses || 0,
+              durationMs: (t.usage as Record<string, number>).duration_ms || 0,
+              lastToolName: t.last_tool_name as string,
+            });
+          }
           break;
         }
         case "assistant":
@@ -80,19 +92,20 @@ export function useStreamParser() {
           // 提取 token 用量和上下文窗口
           if (claudeData.usage) {
             const u = claudeData.usage;
-            // 从 modelUsage 提取 contextWindow（取第一个模型的值）
+            // 从 modelUsage 提取 contextWindow（取所有模型中的最大值）
             let contextWindow = 0;
             const modelUsage = claudeData.modelUsage;
             if (modelUsage) {
-              const modelNames = Object.keys(modelUsage);
-              if (modelNames.length > 0) {
-                contextWindow = modelUsage[modelNames[0]].contextWindow || 0;
+              for (const m of Object.values(modelUsage)) {
+                const w = m.contextWindow || 0;
+                if (w > contextWindow) contextWindow = w;
               }
             }
             context.onTokenUsage?.({
               inputTokens: u.input_tokens || 0,
               outputTokens: u.output_tokens || 0,
               cacheReadTokens: u.cache_read_input_tokens || 0,
+              cacheCreationTokens: u.cache_creation_input_tokens || 0,
               costUSD: claudeData.total_cost_usd || 0,
               contextWindow,
             });
