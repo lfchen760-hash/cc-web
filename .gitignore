@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.env
+*.log
+data/
+*.db
+*.db-shm
+*.db-wal
+.DS_Store
+DEVELOPMENT_PLAN.md
+plan.txt
+crystalline-humming-sedgewick.md
+.claude/settings.local.json
