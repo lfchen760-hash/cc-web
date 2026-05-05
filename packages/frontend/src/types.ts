@@ -234,41 +234,80 @@ import type { StreamResponse } from "../../shared/types";
 // ====== cc-web WS 协议消息类型 ======
 
 // 浏览器 → 中转
+// 节点信息
+export interface NodeInfo {
+  nodeId: string;
+  sessionCount: number;
+  passwordRequired?: boolean;
+}
+
+export interface WSAuthNodeMessage {
+  type: 'auth_node';
+  nodeId: string;
+  password: string;
+}
+
 export interface WSChatMessage {
   type: "chat";
   sessionId: string;
   text: string;
+  nodeId?: string;
+  permissionMode?: string;
 }
 
 export interface WSCreateSessionMessage {
   type: "create_session";
   projectPath: string;
   projectId?: string;
+  nodeId?: string;
+  model?: string;
+  permissionMode?: string;
 }
 
 export interface WSStopSessionMessage {
   type: "stop_session";
   sessionId: string;
+  nodeId?: string;
 }
 
 export interface WSListSessionsMessage {
   type: "list_sessions";
   projectId?: string;
+  nodeId?: string;
 }
 
 export interface WSCreateProjectMessage {
   type: "create_project";
   name: string;
   path: string;
+  nodeId?: string;
 }
 
 export interface WSDeleteProjectMessage {
   type: "delete_project";
   projectId: string;
+  nodeId?: string;
 }
 
 export interface WSListProjectsMessage {
   type: "list_projects";
+  nodeId?: string;
+}
+
+export interface WSSelectNodeMessage {
+  type: "select_node";
+  nodeId: string;
+}
+
+export interface WSListNodesMessage {
+  type: "list_nodes";
+}
+
+export interface WSRetryWithPermissionMessage {
+  type: "retry_with_permission";
+  sessionId: string;
+  permissionMode: string;
+  nodeId?: string;
 }
 
 export type WSBrowserMessage =
@@ -278,13 +317,18 @@ export type WSBrowserMessage =
   | WSListSessionsMessage
   | WSCreateProjectMessage
   | WSDeleteProjectMessage
-  | WSListProjectsMessage;
+  | WSListProjectsMessage
+  | WSSelectNodeMessage
+  | WSListNodesMessage
+  | WSAuthNodeMessage
+  | WSRetryWithPermissionMessage;
 
 // 项目信息
 export interface ProjectInfo {
   projectId: string;
   name: string;
   path: string;
+  nodeId?: string;
   sessionCount: number;
   createdAt: number;
 }
@@ -294,6 +338,7 @@ export interface SessionInfo {
   sessionId: string;
   projectId: string;
   projectPath: string;
+  nodeId?: string;
   model?: string;
   permissionMode?: string;
   summary: string;

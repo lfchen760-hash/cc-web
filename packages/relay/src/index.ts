@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { RELAY_PORT, STATIC_DIR } from './config.js';
 import { serveStatic } from './static.js';
-import { handleBrowserConnection, handleLocalConnection, requestLocal } from './ws-relay.js';
+import { handleBrowserConnection, handleLocalConnection, requestLocal, getOnlineNodes, isNodePasswordRequired } from './ws-relay.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const staticDir = path.resolve(__dirname, STATIC_DIR);
@@ -14,10 +14,31 @@ function jsonResponse(res: http.ServerResponse, data: unknown, status = 200): vo
   res.end(JSON.stringify(data));
 }
 
+function getQueryParam(req: http.IncomingMessage, name: string): string | undefined {
+  const url = req.url || '';
+  const idx = url.indexOf('?');
+  if (idx === -1) return undefined;
+  const params = new URLSearchParams(url.slice(idx));
+  return params.get(name) || undefined;
+}
+
 const server = http.createServer((req, res) => {
-  // API 路由
-  if (req.url === '/api/projects' && req.method === 'GET') {
-    requestLocal({ type: 'list_projects' })
+  // 节点列表 API
+  if (req.url?.startsWith('/api/nodes') && req.method === 'GET') {
+    jsonResponse(res, getOnlineNodes());
+    return;
+  }
+
+  // 项目列表 API
+  if (req.url?.startsWith('/api/projects') && req.method === 'GET') {
+    const nodeId = getQueryParam(req, 'nodeId');
+    // 指定节点需密码 → 拦截；未指定节点但首个在线节点需密码 → 也拦截
+    const targetNodeId = nodeId || getOnlineNodes()[0]?.nodeId;
+    if (targetNodeId && isNodePasswordRequired(targetNodeId)) {
+      jsonResponse(res, { error: 'auth_required', message: '此节点需要密码认证' }, 401);
+      return;
+    }
+    requestLocal({ type: 'list_projects' }, nodeId)
       .then((msg) => {
         const data = msg as { projects?: unknown };
         jsonResponse(res, data.projects || []);
@@ -26,10 +47,17 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // 会话列表 API
   if (req.url?.startsWith('/api/sessions') && req.method === 'GET') {
     const url = new URL(req.url, 'http://localhost');
     const projectId = url.searchParams.get('projectId') || undefined;
-    requestLocal({ type: 'list_sessions', projectId })
+    const nodeId = url.searchParams.get('nodeId') || undefined;
+    const targetNodeId = nodeId || getOnlineNodes()[0]?.nodeId;
+    if (targetNodeId && isNodePasswordRequired(targetNodeId)) {
+      jsonResponse(res, { error: 'auth_required', message: '此节点需要密码认证' }, 401);
+      return;
+    }
+    requestLocal({ type: 'list_sessions', projectId }, nodeId)
       .then((msg) => {
         const data = msg as { sessions?: unknown };
         jsonResponse(res, data.sessions || []);

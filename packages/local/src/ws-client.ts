@@ -1,5 +1,5 @@
 import { WebSocket } from 'ws';
-import { RELAY_URL, RELAY_TOKEN, NODE_ID, RECONNECT_DELAY, MAX_RECONNECT_DELAY } from './config.js';
+import { RELAY_URL, RELAY_TOKEN, NODE_ID, NODE_PASSWORD, RECONNECT_DELAY, MAX_RECONNECT_DELAY } from './config.js';
 
 type MessageHandler = (msg: { type: string; [key: string]: unknown }) => void;
 
@@ -42,7 +42,7 @@ function connect(): void {
     currentDelay = RECONNECT_DELAY;
 
     // 注册
-    send({ type: 'register', nodeId: NODE_ID, token: RELAY_TOKEN });
+    send({ type: 'register', nodeId: NODE_ID, token: RELAY_TOKEN, passwordRequired: !!NODE_PASSWORD });
   });
 
   ws.on('message', (raw) => {

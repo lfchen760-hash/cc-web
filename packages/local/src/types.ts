@@ -37,6 +37,9 @@ export interface WSMessage {
   error?: string;
   nodeId?: string;
   token?: string;
+  password?: string;
+  success?: boolean;
+  passwordRequired?: boolean;
   sessions?: SessionInfo[];
   projects?: ProjectInfo[];
   project?: ProjectInfo;

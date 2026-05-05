@@ -1,4 +1,5 @@
 import { start, onMessage, send } from './ws-client.js';
+import { NODE_PASSWORD, NODE_ID } from './config.js';
 import {
   createSession,
   sendMessage,
@@ -121,6 +122,18 @@ onMessage((msg) => {
         messages: getHistory(s.sessionId) || [],
       }));
       reply({ type: 'sessions_list', sessions: sessionsWithHistory });
+      break;
+    }
+
+    case 'auth_node': {
+      const password = msg.password as string;
+      if (!NODE_PASSWORD) {
+        reply({ type: 'auth_result', nodeId: NODE_ID, success: true });
+      } else if (password === NODE_PASSWORD) {
+        reply({ type: 'auth_result', nodeId: NODE_ID, success: true });
+      } else {
+        reply({ type: 'auth_result', nodeId: NODE_ID, success: false, error: '密码错误' });
+      }
       break;
     }
   }

@@ -8,10 +8,10 @@ echo "=== cc-web 重启 ==="
 # 按端口杀掉进程，不误杀其他 node
 echo "[1/4] 停止旧进程..."
 for port in 3001 5173; do
-    pid=$(netstat -ano 2>/dev/null | grep ":$port " | grep LISTENING | awk '{print $5}' | head -1)
-    if [ -n "$pid" ] && [ "$pid" != "0" ]; then
+    pid=$(lsof -ti ":$port" 2>/dev/null)
+    if [ -n "$pid" ]; then
         echo "  关闭占用端口 $port 的进程 PID=$pid"
-        taskkill //PID "$pid" //F 2>/dev/null || true
+        kill -9 "$pid" 2>/dev/null || true
     fi
 done
 sleep 2
@@ -24,13 +24,13 @@ npx vite build
 echo ""
 echo "[3/4] 启动中继服务 (端口 3001)..."
 cd "$SCRIPT_DIR/packages/relay"
-npx tsx src/index.ts &
-sleep 2
+npx tsx --env-file=../../.env src/index.ts &
+sleep 1
 
 echo ""
 echo "[4/4] 启动本地服务 + 前端 (端口 5173)..."
 cd "$SCRIPT_DIR/packages/local"
-npx tsx src/index.ts &
+npx tsx --env-file=../../.env src/index.ts &
 sleep 1
 
 cd "$SCRIPT_DIR/packages/frontend"

@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from "react";
-import type { AllMessage, ChatMessage, SessionInfo, ProjectInfo } from "../types";
+import type { AllMessage, ChatMessage, SessionInfo, ProjectInfo, NodeInfo } from "../types";
 import { useWebSocket } from "../hooks/useWebSocket";
 import { useClaudeStreaming } from "../hooks/useClaudeStreaming";
 import type { StreamingContext } from "../hooks/streaming/useMessageProcessor";
@@ -10,6 +10,21 @@ import { ChatInput } from "./ChatInput";
 import { StatusBar } from "./StatusBar";
 import { ModelPicker } from "./ModelPicker";
 import { PermissionDialog } from "./PermissionDialog";
+
+// 去重：result 消息的文本与它前面的 assistant 消息相同，批量加载时会产生重复
+function dedupConsecutiveAssistant(messages: AllMessage[]): AllMessage[] {
+  const result: AllMessage[] = [];
+  for (const msg of messages) {
+    if (msg.type === 'chat' && msg.role === 'assistant') {
+      const prev = result[result.length - 1];
+      if (prev && prev.type === 'chat' && prev.role === 'assistant' && prev.content === msg.content) {
+        continue;
+      }
+    }
+    result.push(msg);
+  }
+  return result;
+}
 
 const KNOWN_MODELS = [
   { id: "claude-opus-4-5", name: "Claude Opus 4.5" },
@@ -63,31 +78,139 @@ export function ChatView() {
     contextWindow: number;
     compactionVersion: number;
   } | null>(null);
+  const [nodes, setNodes] = useState<NodeInfo[]>([]);
+  const [activeNodeId, setActiveNodeId] = useState<string | null>(null);
+  const [authenticatedNodes, setAuthenticatedNodes] = useState<Set<string>>(new Set());
+  const [pendingAuthNodeId, setPendingAuthNodeId] = useState<string | null>(null);
+  const [authError, setAuthError] = useState<string | null>(null);
 
   const currentAssistantMessageRef = useRef<ChatMessage | null>(null);
   const initialLoadDone = useRef(false);
   const pendingSessionRef = useRef<string | null>(null);
   const handleRawMessageRef = useRef<((raw: string) => void) | null>(null);
+  const restoredRef = useRef(false);
 
-  // 初始加载项目列表（通过 HTTP，可靠）
+  // 持久化最后浏览状态
+  const LAST_VIEW_KEY = "cc-web-last-view";
+  const saveLastView = (nodeId: string, projectId?: string | null, sessionId?: string | null) => {
+    try {
+      localStorage.setItem(LAST_VIEW_KEY, JSON.stringify({
+        nodeId,
+        projectId: projectId || undefined,
+        sessionId: sessionId || undefined,
+      }));
+    } catch { /* localStorage 不可用 */ }
+  };
+  const loadLastView = (): { nodeId?: string; projectId?: string; sessionId?: string } | null => {
+    try {
+      const raw = localStorage.getItem(LAST_VIEW_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch { return null; }
+  };
+
+  // 初始加载节点列表和项目列表（通过 HTTP，可靠）
   useEffect(() => {
     if (initialLoadDone.current) return;
     initialLoadDone.current = true;
 
-    fetch("/api/projects")
+    const saved = loadLastView();
+
+    fetch("/api/nodes")
       .then((r) => r.json())
-      .then((data: ProjectInfo[]) => {
-        setProjects(data);
+      .then((data: NodeInfo[]) => {
+        setNodes(data);
+
+        // 恢复上次的节点（如果还在线），否则单节点时自动选中
+        const restoreNodeId = saved?.nodeId && data.some((n) => n.nodeId === saved.nodeId)
+          ? saved.nodeId
+          : data.length === 1
+            ? data[0].nodeId
+            : null;
+
+        if (restoreNodeId) {
+          setActiveNodeId(restoreNodeId);
+          restoredRef.current = true;
+          pendingSessionRef.current = saved?.sessionId || null;
+
+          // 加载该节点的项目和会话
+          fetch(`/api/projects?nodeId=${encodeURIComponent(restoreNodeId)}`)
+            .then((r) => r.json())
+            .then((projData) => {
+              if ((projData as { error?: string }).error === 'auth_required') {
+                setPendingAuthNodeId(restoreNodeId);
+                return;
+              }
+              setProjects(projData as ProjectInfo[]);
+            })
+            .catch(() => {});
+          fetch(`/api/sessions?nodeId=${encodeURIComponent(restoreNodeId)}`)
+            .then((r) => r.json())
+            .then((sessData: SessionInfo[] | { error?: string }) => {
+              if ('error' in sessData && sessData.error === 'auth_required') {
+                setPendingAuthNodeId(restoreNodeId);
+                return;
+              }
+              const sessions = sessData as SessionInfo[];
+              setSessions(sessions);
+              // 恢复上次的会话（含历史消息）
+              pendingSessionRef.current = null;
+              if (saved?.sessionId) {
+                const target = sessions.find((s) => s.sessionId === saved.sessionId);
+                if (target) {
+                  setActiveSessionId(target.sessionId);
+                  setActiveProjectId(target.projectId);
+                  if (target.model) setModel(target.model);
+                  if (target.permissionMode) setPermissionMode(target.permissionMode);
+                  // 加载历史消息
+                  if (target.messages && target.messages.length > 0) {
+                    const msgs = target.messages as unknown as Record<string, unknown>[];
+                    const historyProcessor = new UnifiedMessageProcessor();
+                    const created = target.createdAt || Date.now();
+                    const timestamped = msgs
+                      .filter((m) => m.type === "claude_json" && m.data)
+                      .map((m, i) => ({
+                        ...(m.data as Record<string, unknown>),
+                        timestamp: new Date(created + i).toISOString(),
+                      }));
+                    if (timestamped.length > 0) {
+                      const processed = historyProcessor.processMessagesBatch(
+                        timestamped as Parameters<typeof historyProcessor.processMessagesBatch>[0],
+                      );
+                      setMessages(dedupConsecutiveAssistant(processed));
+                    }
+                    setHasReceivedInit(true);
+                  }
+                }
+              }
+            })
+            .catch(() => {});
+        }
       })
       .catch(() => {});
 
-    fetch("/api/sessions")
-      .then((r) => r.json())
-      .then((data: SessionInfo[]) => {
-        setSessions(data);
-      })
-      .catch(() => {});
+    // 没有恢复节点时才用默认请求（无 nodeId = 取第一个在线节点）
+    if (!saved?.nodeId) {
+      fetch("/api/projects")
+        .then((r) => r.json())
+        .then((data: ProjectInfo[]) => {
+          if (!restoredRef.current) setProjects(data);
+        })
+        .catch(() => {});
+      fetch("/api/sessions")
+        .then((r) => r.json())
+        .then((data: SessionInfo[]) => {
+          if (!restoredRef.current) setSessions(data);
+        })
+        .catch(() => {});
+    }
   }, []);
+
+  // 持久化当前浏览状态
+  useEffect(() => {
+    if (activeNodeId) {
+      saveLastView(activeNodeId, activeProjectId, activeSessionId);
+    }
+  }, [activeNodeId, activeProjectId, activeSessionId]);
 
   // 处理一条 WebSocket 原始消息
   const handleRawMessage = useCallback(
@@ -97,6 +220,44 @@ export function ChatView() {
       for (const line of lines) {
         try {
           const data = JSON.parse(line);
+
+          // 节点列表更新
+          if (data.type === "nodes_list" && data.nodes) {
+            const nodeList = data.nodes as NodeInfo[];
+            setNodes(nodeList);
+            // 只有一个节点时自动选中；当前选中节点不在线时清空
+            if (nodeList.length === 1) {
+              setActiveNodeId((prev) => prev || nodeList[0].nodeId);
+            } else if (nodeList.length === 0) {
+              setActiveNodeId(null);
+            }
+            continue;
+          }
+
+          // 认证结果
+          if (data.type === "auth_result") {
+            const resultNodeId = data.nodeId as string;
+            if (data.success) {
+              setAuthenticatedNodes((prev) => {
+                const next = new Set(prev);
+                next.add(resultNodeId);
+                return next;
+              });
+              setPendingAuthNodeId(null);
+              setAuthError(null);
+              // 通过 WebSocket 加载项目和会话
+              send({ type: "list_projects", nodeId: resultNodeId });
+              send({ type: "list_sessions", nodeId: resultNodeId });
+            } else {
+              setAuthError((data.error as string) || "认证失败");
+            }
+            continue;
+          }
+
+          // 按 nodeId 过滤：消息附带 nodeId 且与当前选中节点不匹配时跳过
+          if (data.nodeId && activeNodeId && data.nodeId !== activeNodeId) {
+            continue;
+          }
 
           if (data.type === "projects_list" && data.projects) {
             setProjects(data.projects);
@@ -170,7 +331,7 @@ export function ChatView() {
                   const processed = historyProcessor.processMessagesBatch(
                     timestamped as Parameters<typeof historyProcessor.processMessagesBatch>[0],
                   );
-                  setMessages(processed);
+                  setMessages(dedupConsecutiveAssistant(processed));
                 }
                 setHasReceivedInit(true);
               }
@@ -270,7 +431,7 @@ export function ChatView() {
         }
       }
     },
-    [processStreamLine, hasReceivedInit, activeSessionId],
+    [processStreamLine, hasReceivedInit, activeSessionId, activeNodeId],
   );
   handleRawMessageRef.current = handleRawMessage;
 
@@ -281,26 +442,85 @@ export function ChatView() {
     });
   }, [onRawMessage]);
 
-  const handleCreateProject = useCallback(
-    (name: string, projectPath: string) => {
-      send({ type: "create_project", name, path: projectPath });
+  const handleSelectNode = useCallback(
+    (nodeId: string) => {
+      setActiveNodeId(nodeId);
+      setActiveSessionId(null);
+      setActiveProjectId(null);
+      setMessages([]);
+      setProjects([]);
+      setSessions([]);
+      setHasReceivedInit(false);
+      setTokenUsage(null);
+      setModel("");
+      setPermissionMode("");
+      setPermissionDenials(null);
+      setTaskProgress(null);
+      setAuthError(null);
+
+      const node = nodes.find((n) => n.nodeId === nodeId);
+
+      if (node?.passwordRequired && !authenticatedNodes.has(nodeId)) {
+        setPendingAuthNodeId(nodeId);
+        return;
+      }
+
+      setPendingAuthNodeId(null);
+
+      // 加载该节点的项目和会话
+      fetch(`/api/projects?nodeId=${encodeURIComponent(nodeId)}`)
+        .then((r) => r.json())
+        .then((data) => {
+          if ((data as { error?: string }).error === 'auth_required') {
+            setPendingAuthNodeId(nodeId);
+            return;
+          }
+          setProjects(data as ProjectInfo[]);
+        })
+        .catch(() => {});
+
+      fetch(`/api/sessions?nodeId=${encodeURIComponent(nodeId)}`)
+        .then((r) => r.json())
+        .then((data) => {
+          if ((data as { error?: string }).error === 'auth_required') {
+            setPendingAuthNodeId(nodeId);
+            return;
+          }
+          setSessions(data as SessionInfo[]);
+        })
+        .catch(() => {});
+    },
+    [nodes, authenticatedNodes],
+  );
+
+  const handleAuthNode = useCallback(
+    (nodeId: string, password: string) => {
+      setAuthError(null);
+      send({ type: 'auth_node', nodeId, password });
     },
     [send],
   );
 
+  const handleCreateProject = useCallback(
+    (name: string, projectPath: string) => {
+      send({ type: "create_project", name, path: projectPath, nodeId: activeNodeId || undefined });
+    },
+    [send, activeNodeId],
+  );
+
   const handleDeleteProject = useCallback(
     (projectId: string) => {
-      send({ type: "delete_project", projectId });
+      send({ type: "delete_project", projectId, nodeId: activeNodeId || undefined });
     },
-    [send],
+    [send, activeNodeId],
   );
 
   const handleCreateSession = useCallback(
     (projectId: string, projectPath: string) => {
       // acceptEdits: 自动批准文件读写，Bash 等操作仍需确认
-      send({ type: "create_session", projectId, projectPath, permissionMode: "acceptEdits" });
+      send({ type: "create_session", projectId, projectPath, permissionMode: "acceptEdits", nodeId: activeNodeId || undefined });
     },
-    [send],
+    [send, activeNodeId],
   );
 
   const handleSelectSession = useCallback(
@@ -315,17 +535,17 @@ export function ChatView() {
       setPermissionMode("");
       setPermissionDenials(null);
       setTaskProgress(null);
-      send({ type: "list_sessions", projectId });
+      send({ type: "list_sessions", projectId, nodeId: activeNodeId || undefined });
     },
-    [send],
+    [send, activeNodeId],
   );
 
   const handleSelectProject = useCallback(
     (projectId: string) => {
       setActiveProjectId(projectId);
-      send({ type: "list_sessions", projectId });
+      send({ type: "list_sessions", projectId, nodeId: activeNodeId || undefined });
     },
-    [send],
+    [send, activeNodeId],
   );
 
   const handleSlashCommand = useCallback(
@@ -394,10 +614,10 @@ export function ChatView() {
         timestamp: Date.now(),
       };
       setMessages((prev) => [...prev, userMsg]);
-      send({ type: "chat", sessionId: activeSessionId || "", text });
+      send({ type: "chat", sessionId: activeSessionId || "", text, nodeId: activeNodeId || undefined });
       setIsLoading(true);
     },
-    [activeSessionId, send],
+    [activeSessionId, send, activeNodeId],
   );
 
   // 模型选择器回调：用户确认切换模型
@@ -410,7 +630,7 @@ export function ChatView() {
       const project = projects.find((p) => p.projectId === activeProjectId);
       const projectPath = project?.path || "";
       if (projectPath) {
-        send({ type: "create_session", projectId: activeProjectId, projectPath, model: newModel, permissionMode: permissionMode || "acceptEdits" });
+        send({ type: "create_session", projectId: activeProjectId, projectPath, model: newModel, permissionMode: permissionMode || "acceptEdits", nodeId: activeNodeId || undefined });
       }
 
       const infoMsg: ChatMessage = {
@@ -421,7 +641,7 @@ export function ChatView() {
       };
       setMessages((prev) => [...prev, infoMsg]);
     },
-    [activeProjectId, projects, send, permissionMode],
+    [activeProjectId, projects, send, permissionMode, activeNodeId],
   );
 
   const handleSendMessage = useCallback(
@@ -439,10 +659,10 @@ export function ChatView() {
         timestamp: Date.now(),
       };
       setMessages((prev) => [...prev, userMsg]);
-      send({ type: "chat", sessionId: activeSessionId || "", text, permissionMode: permissionMode || "acceptEdits" });
+      send({ type: "chat", sessionId: activeSessionId || "", text, permissionMode: permissionMode || "acceptEdits", nodeId: activeNodeId || undefined });
       setIsLoading(true);
     },
-    [activeSessionId, send, permissionMode, handleSlashCommand],
+    [activeSessionId, send, permissionMode, handleSlashCommand, activeNodeId],
   );
 
   // 权限拒绝处理：批准并重试
@@ -453,6 +673,7 @@ export function ChatView() {
       type: "retry_with_permission",
       sessionId: activeSessionId,
       permissionMode: "bypassPermissions",
+      nodeId: activeNodeId || undefined,
     });
     setPermissionDenials(null);
     // 给用户反馈
@@ -464,7 +685,7 @@ export function ChatView() {
     };
     setMessages((prev) => [...prev, infoMsg]);
     setIsLoading(true);
-  }, [activeSessionId, send]);
+  }, [activeSessionId, send, activeNodeId]);
 
   const handlePermissionDismiss = useCallback(() => {
     setPermissionDenials(null);
@@ -472,22 +693,22 @@ export function ChatView() {
 
   const handleAbort = useCallback(() => {
     if (activeSessionId) {
-      send({ type: "stop_session", sessionId: activeSessionId });
+      send({ type: "stop_session", sessionId: activeSessionId, nodeId: activeNodeId || undefined });
     }
     setIsLoading(false);
     currentAssistantMessageRef.current = null;
-  }, [activeSessionId, send]);
+  }, [activeSessionId, send, activeNodeId]);
 
   const handleStopSession = useCallback(
     (sessionId: string) => {
-      send({ type: "stop_session", sessionId });
+      send({ type: "stop_session", sessionId, nodeId: activeNodeId || undefined });
       setSessions((prev) =>
         prev.map((s) =>
           s.sessionId === sessionId ? { ...s, status: "idle" as const } : s,
         ),
       );
     },
-    [send],
+    [send, activeNodeId],
   );
 
   return (
@@ -521,16 +742,89 @@ export function ChatView() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
             </svg>
           </button>
+          {/* 节点选择器 */}
+          {nodes.length === 0 ? (
+            <span className="text-xs text-amber-600 dark:text-amber-400">无节点在线</span>
+          ) : nodes.length === 1 ? (
+            <span className="text-xs text-emerald-600 dark:text-emerald-400">
+              {nodes[0].passwordRequired && !authenticatedNodes.has(nodes[0].nodeId) ? '\u{1F512} ' : ''}
+              {nodes[0].nodeId}
+              {authenticatedNodes.has(nodes[0].nodeId) ? ' ✓' : ''}
+            </span>
+          ) : (
+            <select
+              value={activeNodeId || ""}
+              onChange={(e) => handleSelectNode(e.target.value)}
+              className="text-xs rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            >
+              <option value="" disabled>选择节点</option>
+              {nodes.map((n) => (
+                <option key={n.nodeId} value={n.nodeId}>
+                  {n.passwordRequired && !authenticatedNodes.has(n.nodeId) ? '\u{1F512} ' : ''}
+                  {n.nodeId} ({n.sessionCount} 会话)
+                  {authenticatedNodes.has(n.nodeId) ? ' ✓' : ''}
+                </option>
+              ))}
+            </select>
+          )}
           {isMobile && (
             <span className="text-xs text-slate-500 dark:text-slate-400">
               {activeSessionId ? "会话中" : "cc-web"}
             </span>
           )}
         </div>
+        {pendingAuthNodeId && (
+          <div className="flex items-center justify-center py-4 px-2 flex-shrink-0">
+            <div className="bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-lg p-4 w-full max-w-sm shadow-lg">
+              <div className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-3">
+                节点 {pendingAuthNodeId} 需要密码认证
+              </div>
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const input = (e.target as HTMLFormElement).querySelector('input');
+                  if (input) {
+                    handleAuthNode(pendingAuthNodeId, input.value);
+                    input.value = '';
+                  }
+                }}
+              >
+                <input
+                  type="password"
+                  placeholder="请输入节点密码"
+                  autoFocus
+                  className="w-full px-3 py-2 text-sm border border-slate-300 dark:border-slate-600 rounded-md bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 mb-2"
+                />
+                {authError && (
+                  <div className="text-xs text-red-500 mb-2">{authError}</div>
+                )}
+                <div className="flex gap-2">
+                  <button
+                    type="submit"
+                    className="flex-1 px-3 py-1.5 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+                  >
+                    认证
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPendingAuthNodeId(null);
+                      setAuthError(null);
+                    }}
+                    className="px-3 py-1.5 text-sm border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-400 rounded-md hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+                  >
+                    取消
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
         <ChatMessages messages={messages} isLoading={isLoading} />
         <StatusBar
           connected={connected}
           sessionId={activeSessionId}
+          nodeId={activeNodeId}
           model={model}
           permissionMode={permissionMode}
           tokenUsage={tokenUsage}

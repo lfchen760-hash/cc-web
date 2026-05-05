@@ -12,10 +12,6 @@
 │ useStreamParser  │       │ 会话路由表    │       │ Claude CLI 子进程│
 │ SessionSidebar   │       │              │       │ (NDJSON stdout)  │
 └──────────────────┘       └──────────────┘       └────────┬─────────┘
-                                                           │ HTTPS
-                                                   ┌───────▼─────────┐
-                                                   │  DeepSeek API   │
-                                                   └─────────────────┘
 ```
 
 ## 快速开始
@@ -27,19 +23,32 @@
 - [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) (`claude` 命令可用)
 - DeepSeek API Key
 
-### 环境变量
+### 配置文件
+
+复制 `.env.example` 为 `.env`，按需修改：
 
 ```bash
-# 本地服务 (packages/local)
-export ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic
-export ANTHROPIC_API_KEY=sk-your-deepseek-key
-export RELAY_URL=ws://localhost:3001/ws/local    # 中转地址
-export RELAY_TOKEN=dev-token                      # 认证 token（与中转一致）
-
-# 中转服务 (packages/relay)
-export RELAY_PORT=3001
-export RELAY_TOKEN=dev-token
+cp .env.example .env
 ```
+
+`.env` 文件内容（带注释）：
+
+```bash
+# ----- 中继服务 -----
+RELAY_PORT=3001                 # 监听端口
+RELAY_TOKEN=dev-token           # 本地服务注册认证 token
+STATIC_DIR=../../frontend/dist  # 前端静态文件路径
+
+# ----- 本地服务 -----
+RELAY_URL=ws://localhost:3001/ws/local  # 中转 WebSocket 地址
+RELAY_TOKEN=dev-token                   # 与中转一致的认证 token
+NODE_ID=                    # 节点标识（留空自动取 hostname）
+NODE_PASSWORD=              # 节点登录密码（留空不启用认证）
+RECONNECT_DELAY=2000        # 重连初始延迟（毫秒）
+MAX_RECONNECT_DELAY=30000   # 重连最大延迟（毫秒）
+```
+
+`--env-file` 由 `npm run dev:relay` / `npm run dev:local` / `restart.sh` 自动加载，也可手动设置环境变量覆盖 `.env` 中的值。
 
 ### 安装 & 运行
 
@@ -97,7 +106,7 @@ cc-web/
 │   │       ├── ws-client.ts      # WebSocket 客户端（自动重连）
 │   │       ├── sdk-runner.ts     # spawn claude CLI → NDJSON
 │   │       ├── session-manager.ts # 会话生命周期 + JSON 持久化
-│   │       └── config.ts         # 中转地址 / 认证配置
+│   │       └── config.ts         # 中转地址 / 认证 / 节点密码配置
 │   └── shared/                   # 前后端共享类型
 │       └── types.ts              # StreamResponse / ChatRequest
 ```
@@ -143,7 +152,8 @@ data/sessions/
 ### 安全
 
 - 中转 ↔ 本地：预共享 token 认证 (`RELAY_TOKEN`)
-- 中转 ↔ 浏览器：无认证（MVP 单用户）
+- 浏览器 ↔ 节点：可选密码认证 (`NODE_PASSWORD`)，选中需密码的节点时前端弹出密码输入框，验证通过后才能访问项目/会话
+- 节点列表接口无需认证，始终公开
 - 静态文件服务：路径穿越防护
 - 本地服务：不暴露任何端口，仅作 WS 客户端
 
