@@ -10,4 +10,6 @@ data/
 DEVELOPMENT_PLAN.md
 plan.txt
 crystalline-humming-sedgewick.md
-.claude/settings.local.json
+.claude/
+.idea/
+*.tsbuildinfo
