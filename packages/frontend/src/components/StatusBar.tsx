@@ -21,6 +21,7 @@ interface TaskProgress {
 interface StatusBarProps {
   connected: boolean;
   sessionId: string | null;
+  nodeId?: string | null;
   model: string;
   permissionMode?: string;
   tokenUsage: TokenUsage | null;
@@ -42,6 +43,7 @@ function fmtMs(ms: number): string {
 export function StatusBar({
   connected,
   sessionId,
+  nodeId,
   model,
   permissionMode,
   tokenUsage,
@@ -160,6 +162,11 @@ export function StatusBar({
           <div className="px-3 sm:px-4 pb-3 space-y-2 text-xs text-slate-600 dark:text-slate-400">
             {/* 基本信息行 */}
             <div className="flex flex-wrap gap-x-4 gap-y-1">
+              {nodeId && (
+                <span>
+                  节点: <span className="text-slate-700 dark:text-slate-300">{nodeId}</span>
+                </span>
+              )}
               {sessionId && (
                 <span>
                   会话: <span className="text-slate-700 dark:text-slate-300">{sessionId.substring(0, 8)}...</span>

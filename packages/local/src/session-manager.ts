@@ -283,6 +283,12 @@ export function sendMessage(
   // 记住最后一条用户消息（权限重试时用于重发）
   session.lastUserText = text;
 
+  // 存储用户消息到历史
+  session.messages.push({
+    type: 'claude_json',
+    data: { type: 'user', message: { role: 'user', content: [{ type: 'text', text }] } },
+  } as StreamResponse);
+
   // 发送用户消息到持久进程的 stdin
   const ok = session.runner.send(text);
   if (!ok) {
