@@ -5,24 +5,24 @@ import type { StreamResponse } from './types.js';
 /** 找到真正的 claude CLI 路径，避开 node_modules/.bin 里的李鬼 */
 function resolveClaudeBin(): string {
   const isWindows = process.platform === 'win32';
+  const cleanPath = (process.env.PATH || '')
+    .split(':')
+    .filter((p) => !p.includes('node_modules'))
+    .join(':');
+
   try {
     const cmd = isWindows ? 'where claude' : 'which claude';
-    const output = execSync(cmd, { encoding: 'utf-8' }).trim();
+    const output = execSync(cmd, { encoding: 'utf-8', env: { ...process.env, PATH: cleanPath } }).trim();
     const lines = output.split('\n').map((s: string) => s.trim()).filter(Boolean);
+    // Windows: 优先选 .cmd/.bat 后缀（排除 node_modules 版本）
     for (const line of lines) {
-      if (!line.includes('node_modules') && (line.endsWith('.cmd') || line.endsWith('.bat'))) {
-        return line;
-      }
+      if (!line.includes('node_modules') && (line.endsWith('.cmd') || line.endsWith('.bat'))) return line;
     }
     for (const line of lines) {
-      if (!line.includes('node_modules')) {
-        return isWindows && !line.endsWith('.cmd') ? line + '.cmd' : line;
-      }
+      if (!line.includes('node_modules')) return line;
     }
-    if (lines.length > 0) return lines[0];
-  } catch {
-    // 忽略
-  }
+  } catch { /* 忽略 */ }
+
   if (isWindows) {
     return process.env.APPDATA + '\\npm\\claude.cmd';
   }

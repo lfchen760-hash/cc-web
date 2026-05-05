@@ -8,7 +8,7 @@ echo "=== cc-web 重启 ==="
 # 按端口杀掉进程，不误杀其他 node
 echo "[1/4] 停止旧进程..."
 for port in 3001 5173; do
-    pid=$(lsof -ti ":$port" 2>/dev/null)
+    pid=$(lsof -ti ":$port" 2>/dev/null || true)
     if [ -n "$pid" ]; then
         echo "  关闭占用端口 $port 的进程 PID=$pid"
         kill -9 "$pid" 2>/dev/null || true

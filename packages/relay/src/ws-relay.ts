@@ -381,7 +381,14 @@ function handleLocalMessage(ws: WebSocket, msg: LocalMessage): void {
           ? (msg.data as { type?: string }).type
           : '';
         console.log(`[relay] 收到 ${msg.type}${subType ? '/' + subType : ''} sessionId=${(msg.sessionId || '').substring(0, 8)}, 浏览器数=${msg.sessionId ? (browserSessions.get(msg.sessionId)?.size ?? 0) : 'N/A'}`);
-        broadcastToSession(msg.sessionId, msg);
+        // 有订阅者时按 session 转发，否则广播到所有浏览器（处理自动创建的会话）
+        const clients = browserSessions.get(msg.sessionId);
+        if (clients && clients.size > 0) {
+          broadcastToSession(msg.sessionId, msg);
+        } else {
+          const nodeId = (ws as unknown as Record<string, unknown>)._nodeId as string;
+          broadcastToAllBrowsers({ ...msg, nodeId });
+        }
       } else {
         console.log('[relay] ⚠️ 缺少 sessionId，无法转发:', msg.type);
       }

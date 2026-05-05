@@ -7,6 +7,7 @@ import {
   retryWithPermission,
   updatePermissionMode,
   listSessions,
+  getSession,
   getHistory,
   generateSummary,
   loadPersistedSessions,
@@ -33,10 +34,24 @@ onMessage((msg) => {
       break;
 
     case 'chat': {
-      const sessionId = msg.sessionId as string | undefined;
+      let sessionId = msg.sessionId as string | undefined;
       const text = msg.text as string | undefined;
       const permMode = msg.permissionMode as string | undefined;
-      if (!sessionId || !text) return;
+      if (!text) return;
+
+      // 无有效会话时自动创建默认项目+会话
+      if (!sessionId || !getSession(sessionId)) {
+        const projects = listProjects();
+        let project = projects[0];
+        if (!project) {
+          project = createProject('default', process.cwd());
+          send({ type: 'projects_list', projects: listProjects() });
+        }
+        const info = createSession(project.projectId, project.projectPath, undefined, permMode);
+        sessionId = info.sessionId;
+        send({ type: 'session_info', ...info });
+      }
+
       // 同步前端设置的权限模式
       if (permMode) {
         updatePermissionMode(sessionId, permMode);
