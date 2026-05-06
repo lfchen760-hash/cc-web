@@ -127,7 +127,7 @@ function handleBrowserMessage(ws: WebSocket, msg: BrowserMessage): void {
         browserSessions.get(msg.sessionId)!.add(ws);
         (ws as unknown as Record<string, unknown>)._sessionId = msg.sessionId;
       }
-      send(node.ws, { type: 'chat', sessionId: msg.sessionId, text: msg.text, permissionMode: msg.permissionMode });
+      send(node.ws, { type: 'chat', sessionId: msg.sessionId, text: msg.text, permissionMode: msg.permissionMode, projectPath: msg.projectPath });
       break;
     }
 

@@ -90,18 +90,20 @@ export function ChatView() {
   const handleRawMessageRef = useRef<((raw: string) => void) | null>(null);
   const restoredRef = useRef(false);
 
-  // 持久化最后浏览状态
+  // 持久化最后浏览状态（含 projectPath，避免重启后路径依赖 process.cwd()）
   const LAST_VIEW_KEY = "cc-web-last-view";
-  const saveLastView = (nodeId: string, projectId?: string | null, sessionId?: string | null) => {
+  const saveLastView = (nodeId: string, projectId?: string | null, sessionId?: string | null, projectPath?: string | null, projectName?: string | null) => {
     try {
       localStorage.setItem(LAST_VIEW_KEY, JSON.stringify({
         nodeId,
         projectId: projectId || undefined,
         sessionId: sessionId || undefined,
+        projectPath: projectPath || undefined,
+        projectName: projectName || undefined,
       }));
     } catch { /* localStorage 不可用 */ }
   };
-  const loadLastView = (): { nodeId?: string; projectId?: string; sessionId?: string } | null => {
+  const loadLastView = (): { nodeId?: string; projectId?: string; sessionId?: string; projectPath?: string; projectName?: string } | null => {
     try {
       const raw = localStorage.getItem(LAST_VIEW_KEY);
       return raw ? JSON.parse(raw) : null;
@@ -208,9 +210,13 @@ export function ChatView() {
   // 持久化当前浏览状态
   useEffect(() => {
     if (activeNodeId) {
-      saveLastView(activeNodeId, activeProjectId, activeSessionId);
+      const session = sessions.find(s => s.sessionId === activeSessionId);
+      const project = activeProjectId ? projects.find(p => p.projectId === activeProjectId) : null;
+      saveLastView(activeNodeId, activeProjectId, activeSessionId,
+        session?.projectPath || project?.path,
+        project?.name);
     }
-  }, [activeNodeId, activeProjectId, activeSessionId]);
+  }, [activeNodeId, activeProjectId, activeSessionId, sessions, projects]);
 
   // 处理一条 WebSocket 原始消息
   const handleRawMessage = useCallback(
@@ -652,6 +658,20 @@ export function ChatView() {
         return;
       }
 
+      // 没有活跃会话时提示用户创建项目
+      if (!activeSessionId) {
+        const tipMsg: ChatMessage = {
+          type: "chat",
+          role: "assistant",
+          content: projects.length === 0
+            ? '请先在左侧创建一个项目并指定工作目录，然后创建会话。'
+            : '请先在左侧选择一个项目并创建会话。',
+          timestamp: Date.now(),
+        };
+        setMessages((prev) => [...prev, tipMsg]);
+        return;
+      }
+
       const userMsg: ChatMessage = {
         type: "chat",
         role: "user",
@@ -659,10 +679,10 @@ export function ChatView() {
         timestamp: Date.now(),
       };
       setMessages((prev) => [...prev, userMsg]);
-      send({ type: "chat", sessionId: activeSessionId || "", text, permissionMode: permissionMode || "acceptEdits", nodeId: activeNodeId || undefined });
+      send({ type: "chat", sessionId: activeSessionId, text, permissionMode: permissionMode || "acceptEdits", nodeId: activeNodeId || undefined });
       setIsLoading(true);
     },
-    [activeSessionId, send, permissionMode, handleSlashCommand, activeNodeId],
+    [activeSessionId, send, permissionMode, handleSlashCommand, activeNodeId, projects],
   );
 
   // 权限拒绝处理：批准并重试

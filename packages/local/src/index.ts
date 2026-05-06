@@ -39,17 +39,12 @@ onMessage((msg) => {
       const permMode = msg.permissionMode as string | undefined;
       if (!text) return;
 
-      // 无有效会话时自动创建默认项目+会话
+      // 必须有有效的项目和会话，不允许自动创建
       if (!sessionId || !getSession(sessionId)) {
-        const projects = listProjects();
-        let project = projects[0];
-        if (!project) {
-          project = createProject('default', process.cwd());
-          send({ type: 'projects_list', projects: listProjects() });
+        if (sessionId) {
+          send({ type: 'error', sessionId, error: '会话已过期，请刷新页面后重新创建会话' });
         }
-        const info = createSession(project.projectId, project.projectPath, undefined, permMode);
-        sessionId = info.sessionId;
-        send({ type: 'session_info', ...info });
+        return;
       }
 
       // 同步前端设置的权限模式
@@ -67,9 +62,13 @@ onMessage((msg) => {
 
     case 'create_project': {
       const name = (msg.name as string) || '';
-      const projectPath = (msg.path as string) || process.cwd();
+      const projectPath = msg.path as string;
       if (!name) {
         reply({ type: 'error', error: '项目名称不能为空' });
+        return;
+      }
+      if (!projectPath) {
+        reply({ type: 'error', error: '项目路径不能为空' });
         return;
       }
       const project = createProject(name, projectPath);
@@ -101,11 +100,15 @@ onMessage((msg) => {
 
     case 'create_session': {
       const projectId = (msg.projectId as string) || '';
-      const projectPath = (msg.projectPath as string) || process.cwd();
+      const projectPath = msg.projectPath as string;
       const model = (msg.model as string) || undefined;
       const permissionMode = (msg.permissionMode as string) || undefined;
       if (!projectId) {
         reply({ type: 'error', error: '创建会话需要指定 projectId' });
+        return;
+      }
+      if (!projectPath) {
+        reply({ type: 'error', error: '创建会话需要指定 projectPath' });
         return;
       }
       const info = createSession(projectId, projectPath, model, permissionMode);
