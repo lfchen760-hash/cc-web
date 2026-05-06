@@ -89,6 +89,8 @@ export function ChatView() {
   const pendingSessionRef = useRef<string | null>(null);
   const handleRawMessageRef = useRef<((raw: string) => void) | null>(null);
   const restoredRef = useRef(false);
+  const activeSessionIdRef = useRef(activeSessionId);
+  activeSessionIdRef.current = activeSessionId;
 
   // 持久化最后浏览状态（含 projectPath，避免重启后路径依赖 process.cwd()）
   const LAST_VIEW_KEY = "cc-web-last-view";
@@ -322,7 +324,15 @@ export function ChatView() {
               const targetSession = (data.sessions as SessionInfo[]).find(
                 (s) => s.sessionId === pendingId,
               );
-              if (targetSession?.messages && targetSession.messages.length > 0) {
+              if (targetSession) {
+                // 恢复活跃会话状态（HTTP 认证失败时通过 WebSocket 恢复）
+                if (!activeSessionIdRef.current) {
+                  setActiveSessionId(targetSession.sessionId);
+                  setActiveProjectId(targetSession.projectId);
+                  if (targetSession.model) setModel(targetSession.model);
+                  if (targetSession.permissionMode) setPermissionMode(targetSession.permissionMode);
+                }
+                if (targetSession.messages && targetSession.messages.length > 0) {
                 const msgs = targetSession.messages as unknown as Record<string, unknown>[];
                 const historyProcessor = new UnifiedMessageProcessor();
                 const created = targetSession.createdAt || Date.now();
@@ -341,6 +351,7 @@ export function ChatView() {
                 }
                 setHasReceivedInit(true);
               }
+              }
             }
             continue;
           }
@@ -357,6 +368,12 @@ export function ChatView() {
             data.type === "done" ||
             data.type === "aborted"
           ) {
+            // 刷新后正在运行的会话继续发送流式消息，自动恢复 activeSessionId
+            const streamSid = data.sessionId as string | undefined;
+            if (streamSid && !activeSessionIdRef.current) {
+              setActiveSessionId(streamSid);
+            }
+
             const streamingContext: StreamingContext = {
               currentAssistantMessage: currentAssistantMessageRef.current,
               setCurrentAssistantMessage: (msg) => {
