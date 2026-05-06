@@ -191,13 +191,13 @@ export function ChatView() {
     // 没有恢复节点时才用默认请求（无 nodeId = 取第一个在线节点）
     if (!saved?.nodeId) {
       fetch("/api/projects")
-        .then((r) => r.json())
+        .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
         .then((data: ProjectInfo[]) => {
           if (!restoredRef.current) setProjects(data);
         })
         .catch(() => {});
       fetch("/api/sessions")
-        .then((r) => r.json())
+        .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
         .then((data: SessionInfo[]) => {
           if (!restoredRef.current) setSessions(data);
         })
