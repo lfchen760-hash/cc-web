@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from "react";
-import type { AllMessage, ChatMessage, SessionInfo, ProjectInfo, NodeInfo } from "../types";
+import type { AllMessage, ChatMessage, SessionInfo, ProjectInfo, NodeInfo, GitStatusResult, GitDiffResult } from "../types";
 import { useWebSocket } from "../hooks/useWebSocket";
 import { useClaudeStreaming } from "../hooks/useClaudeStreaming";
 import type { StreamingContext } from "../hooks/streaming/useMessageProcessor";
@@ -10,6 +10,7 @@ import { ChatInput } from "./ChatInput";
 import { StatusBar } from "./StatusBar";
 import { ModelPicker } from "./ModelPicker";
 import { PermissionDialog } from "./PermissionDialog";
+import { GitDiffModal } from "./GitDiffModal";
 
 // 去重：result 消息的文本与它前面的 assistant 消息相同，批量加载时会产生重复
 function dedupConsecutiveAssistant(messages: AllMessage[]): AllMessage[] {
@@ -83,6 +84,8 @@ export function ChatView() {
   const [authenticatedNodes, setAuthenticatedNodes] = useState<Set<string>>(new Set());
   const [pendingAuthNodeId, setPendingAuthNodeId] = useState<string | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [gitStatuses, setGitStatuses] = useState<Map<string, GitStatusResult>>(new Map());
+  const [diffState, setDiffState] = useState<{ filePath: string; projectPath: string; staged: boolean; diff: string } | null>(null);
 
   const currentAssistantMessageRef = useRef<ChatMessage | null>(null);
   const initialLoadDone = useRef(false);
@@ -352,6 +355,29 @@ export function ChatView() {
                 setHasReceivedInit(true);
               }
               }
+            }
+            continue;
+          }
+
+          if (data.type === "git_status" && data.gitStatus) {
+            const status = data.gitStatus as GitStatusResult;
+            setGitStatuses((prev) => {
+              const next = new Map(prev);
+              next.set(status.projectId, status);
+              return next;
+            });
+            continue;
+          }
+
+          if (data.type === "git_diff" && data.diffResult) {
+            const dr = data.diffResult as GitDiffResult;
+            if (!dr.error) {
+              setDiffState({
+                filePath: dr.filePath,
+                projectPath: dr.projectPath,
+                staged: data.staged ?? false,
+                diff: dr.diff,
+              });
             }
             continue;
           }
@@ -748,6 +774,20 @@ export function ChatView() {
     [send, activeNodeId],
   );
 
+  const handleRequestGitStatus = useCallback(
+    (projectId: string, projectPath: string) => {
+      send({ type: "get_git_status", projectPath, projectId, nodeId: activeNodeId || undefined });
+    },
+    [send, activeNodeId],
+  );
+
+  const handleFileClick = useCallback(
+    (filePath: string, projectPath: string, staged: boolean) => {
+      send({ type: "get_git_diff", projectPath, filePath, staged, nodeId: activeNodeId || undefined });
+    },
+    [send, activeNodeId],
+  );
+
   return (
     <div className="flex h-full gap-0 relative">
       <ProjectSidebar
@@ -764,6 +804,9 @@ export function ChatView() {
         isOpen={sidebarOpen}
         isMobile={isMobile}
         onClose={() => setSidebarOpen(false)}
+        gitStatuses={gitStatuses}
+        onRequestGitStatus={handleRequestGitStatus}
+        onFileClick={handleFileClick}
       />
       <div className="flex-1 flex flex-col min-w-0">
         {/* Toggle button bar */}
@@ -890,6 +933,14 @@ export function ChatView() {
           onDismiss={handlePermissionDismiss}
         />
       )}
+
+      <GitDiffModal
+        isOpen={!!diffState}
+        filePath={diffState?.filePath || ""}
+        staged={diffState?.staged ?? false}
+        diffText={diffState?.diff || ""}
+        onClose={() => setDiffState(null)}
+      />
     </div>
   );
 }

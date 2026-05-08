@@ -43,4 +43,32 @@ export interface WSMessage {
   sessions?: SessionInfo[];
   projects?: ProjectInfo[];
   project?: ProjectInfo;
+  filePath?: string;
+  staged?: boolean;
+  gitStatus?: GitStatusResult;
+  diffResult?: GitDiffResult;
+}
+
+export interface GitStatusFile {
+  path: string;
+  staged: string;
+  unstaged: string;
+  displayPath: string;
+}
+
+export interface GitStatusResult {
+  projectPath: string;
+  projectId: string;
+  isGitRepo: boolean;
+  error?: string;
+  staged: GitStatusFile[];
+  unstaged: GitStatusFile[];
+  untracked: GitStatusFile[];
+}
+
+export interface GitDiffResult {
+  projectPath: string;
+  filePath: string;
+  diff: string;
+  error?: string;
 }

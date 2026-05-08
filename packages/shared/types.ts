@@ -53,3 +53,28 @@ export interface ConversationHistory {
     messageCount: number;
   };
 }
+
+// Git status / diff types
+export interface GitStatusFile {
+  path: string;
+  staged: string;       // X column (index)
+  unstaged: string;     // Y column (working tree)
+  displayPath: string;  // renamed files "old -> new"
+}
+
+export interface GitStatusResult {
+  projectPath: string;
+  projectId: string;
+  isGitRepo: boolean;
+  error?: string;
+  staged: GitStatusFile[];
+  unstaged: GitStatusFile[];
+  untracked: GitStatusFile[];
+}
+
+export interface GitDiffResult {
+  projectPath: string;
+  filePath: string;
+  diff: string;         // unified diff text
+  error?: string;
+}

@@ -15,6 +15,7 @@ import {
   listProjects,
   deleteProject,
 } from './session-manager.js';
+import { getGitStatus, getGitDiff } from './git-utils.js';
 
 // 加载持久化会话
 loadPersistedSessions();
@@ -152,6 +153,25 @@ onMessage((msg) => {
       } else {
         reply({ type: 'auth_result', nodeId: NODE_ID, success: false, error: '密码错误' });
       }
+      break;
+    }
+
+    case 'get_git_status': {
+      const projectPath = msg.projectPath as string;
+      const projectId = msg.projectId as string;
+      if (!projectPath || !projectId) return;
+      const status = getGitStatus(projectPath, projectId);
+      reply({ type: 'git_status', gitStatus: status });
+      break;
+    }
+
+    case 'get_git_diff': {
+      const projectPath = msg.projectPath as string;
+      const filePath = msg.filePath as string;
+      const staged = msg.staged === true;
+      if (!projectPath || !filePath) return;
+      const result = getGitDiff(projectPath, filePath, staged);
+      reply({ type: 'git_diff', diffResult: result, staged });
       break;
     }
   }

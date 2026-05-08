@@ -275,6 +275,38 @@ function handleBrowserMessage(ws: WebSocket, msg: BrowserMessage): void {
       }
       break;
     }
+
+    case 'get_git_status': {
+      const targetNode = msg.nodeId || getNodeIdForBrowser(ws);
+      if (!targetNode) {
+        send(ws, { type: 'error', error: '未选择节点' });
+        return;
+      }
+      const node = localNodes.get(targetNode);
+      if (!node) return;
+      if (!isAuthenticated(ws, targetNode)) {
+        send(ws, { type: 'error', error: `节点 ${targetNode} 需要密码认证` });
+        return;
+      }
+      send(node.ws, { type: 'get_git_status', projectPath: msg.projectPath, projectId: msg.projectId });
+      break;
+    }
+
+    case 'get_git_diff': {
+      const targetNode = msg.nodeId || getNodeIdForBrowser(ws);
+      if (!targetNode) {
+        send(ws, { type: 'error', error: '未选择节点' });
+        return;
+      }
+      const node = localNodes.get(targetNode);
+      if (!node) return;
+      if (!isAuthenticated(ws, targetNode)) {
+        send(ws, { type: 'error', error: `节点 ${targetNode} 需要密码认证` });
+        return;
+      }
+      send(node.ws, { type: 'get_git_diff', projectPath: msg.projectPath, filePath: msg.filePath, staged: msg.staged });
+      break;
+    }
   }
 }
 
@@ -397,7 +429,9 @@ function handleLocalMessage(ws: WebSocket, msg: LocalMessage): void {
 
     case 'sessions_list':
     case 'projects_list':
-    case 'project_info': {
+    case 'project_info':
+    case 'git_status':
+    case 'git_diff': {
       const nodeId = (ws as unknown as Record<string, unknown>)._nodeId as string;
       broadcastToAllBrowsers({ ...msg, nodeId });
       break;

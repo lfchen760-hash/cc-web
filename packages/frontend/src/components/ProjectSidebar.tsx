@@ -1,5 +1,6 @@
 import { useState } from "react";
-import type { SessionInfo, ProjectInfo } from "../types";
+import type { SessionInfo, ProjectInfo, GitStatusResult } from "../types";
+import { GitChangeList } from "./GitChangeList";
 
 interface ProjectSidebarProps {
   projects: ProjectInfo[];
@@ -15,6 +16,9 @@ interface ProjectSidebarProps {
   isOpen: boolean;
   isMobile: boolean;
   onClose: () => void;
+  gitStatuses: Map<string, GitStatusResult>;
+  onRequestGitStatus: (projectId: string, projectPath: string) => void;
+  onFileClick: (filePath: string, projectPath: string, staged: boolean) => void;
 }
 
 function statusColor(status: string) {
@@ -42,16 +46,21 @@ export function ProjectSidebar({
   isOpen,
   isMobile,
   onClose,
+  gitStatuses,
+  onRequestGitStatus,
+  onFileClick,
 }: ProjectSidebarProps) {
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
+  const [activeTab, setActiveTab] = useState<Map<string, 'sessions' | 'git'>>(new Map());
 
-  const toggleProject = (projectId: string) => {
+  const toggleProject = (projectId: string, projectPath: string) => {
     setExpandedProjects((prev) => {
       const next = new Set(prev);
       if (next.has(projectId)) {
         next.delete(projectId);
       } else {
         next.add(projectId);
+        onRequestGitStatus(projectId, projectPath);
       }
       return next;
     });
@@ -115,7 +124,7 @@ export function ProjectSidebar({
             return (
               <div key={project.projectId} className="mb-1">
                 <div
-                  onClick={() => toggleProject(project.projectId)}
+                  onClick={() => toggleProject(project.projectId, project.path)}
                   className={`flex items-center gap-2 p-2.5 rounded-lg cursor-pointer transition-colors ${
                     activeProjectId === project.projectId
                       ? "bg-blue-50 dark:bg-blue-900/30"
@@ -155,55 +164,116 @@ export function ProjectSidebar({
                   </button>
                 </div>
 
-                {isExpanded && (
-                  <div className="ml-6 border-l border-slate-200 dark:border-slate-700">
-                    {projectSessions.length === 0 ? (
-                      <p className="text-xs text-slate-400 px-3 py-2">
-                        暂无会话
-                      </p>
-                    ) : (
-                      projectSessions.map((s) => (
-                        <div
-                          key={s.sessionId}
-                          onClick={() => handleSelectSession(s.sessionId, project.projectId)}
-                          className={`ml-1 mb-0.5 p-2.5 rounded-lg cursor-pointer transition-colors ${
-                            activeSessionId === s.sessionId
-                              ? "bg-blue-100 dark:bg-blue-800/40 border border-blue-300 dark:border-blue-600"
-                              : "hover:bg-slate-50 dark:hover:bg-slate-700/50 border border-transparent"
+                {isExpanded && (() => {
+                  const tab = activeTab.get(project.projectId) || 'sessions';
+                  const setTab = (t: 'sessions' | 'git') => {
+                    setActiveTab((prev) => {
+                      const next = new Map(prev);
+                      next.set(project.projectId, t);
+                      return next;
+                    });
+                  };
+                  const gitStatus = gitStatuses.get(project.projectId);
+                  const hasGitChanges = gitStatus && gitStatus.isGitRepo && (
+                    gitStatus.staged.length > 0 ||
+                    gitStatus.unstaged.length > 0 ||
+                    gitStatus.untracked.length > 0
+                  );
+
+                  return (
+                    <div className="ml-6 flex border-l border-slate-200 dark:border-slate-700">
+                      {/* Vertical tab bar */}
+                      <div className="flex flex-col w-9 border-r border-slate-200 dark:border-slate-700 py-1 gap-0.5 flex-shrink-0">
+                        <button
+                          onClick={() => setTab('sessions')}
+                          className={`flex flex-col items-center py-1.5 text-[10px] leading-tight rounded-sm mx-0.5 transition-colors ${
+                            tab === 'sessions'
+                              ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'
+                              : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50'
                           }`}
+                          title="会话"
                         >
-                          <div className="flex items-center gap-2">
-                            <span
-                              className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${statusColor(s.status)}`}
-                            />
-                            <span className="text-sm text-slate-700 dark:text-slate-200 truncate flex-1">
-                              {s.summary || "新会话"}
-                            </span>
-                          </div>
-                          <div className="mt-1 flex items-center justify-between">
-                            <span className="text-xs text-slate-400">
-                              {s.messageCount} 条消息
-                            </span>
-                            <span className="text-xs text-slate-400">
-                              {new Date(s.createdAt).toLocaleDateString()}
-                            </span>
-                            {s.status === "running" && (
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  onStopSession(s.sessionId);
-                                }}
-                                className="text-xs text-red-500 hover:text-red-700"
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+                          </svg>
+                          <span className="mt-0.5" style={{ writingMode: 'vertical-rl' }}>会话</span>
+                        </button>
+                        <button
+                          onClick={() => setTab('git')}
+                          className={`flex flex-col items-center py-1.5 text-[10px] leading-tight rounded-sm mx-0.5 transition-colors relative ${
+                            tab === 'git'
+                              ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'
+                              : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50'
+                          }`}
+                          title="Git"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M12 13l-3 3m0 0l3 3m-3-3h8" />
+                          </svg>
+                          <span className="mt-0.5" style={{ writingMode: 'vertical-rl' }}>Git</span>
+                          {hasGitChanges && (
+                            <span className="absolute top-0.5 right-1 w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                          )}
+                        </button>
+                      </div>
+                      {/* Content area */}
+                      <div className="flex-1 min-w-0">
+                        {tab === 'sessions' ? (
+                          projectSessions.length === 0 ? (
+                            <p className="text-xs text-slate-400 px-3 py-2">
+                              暂无会话
+                            </p>
+                          ) : (
+                            projectSessions.map((s) => (
+                              <div
+                                key={s.sessionId}
+                                onClick={() => handleSelectSession(s.sessionId, project.projectId)}
+                                className={`ml-1 mb-0.5 p-2.5 rounded-lg cursor-pointer transition-colors ${
+                                  activeSessionId === s.sessionId
+                                    ? "bg-blue-100 dark:bg-blue-800/40 border border-blue-300 dark:border-blue-600"
+                                    : "hover:bg-slate-50 dark:hover:bg-slate-700/50 border border-transparent"
+                                }`}
                               >
-                                停止
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                )}
+                                <div className="flex items-center gap-2">
+                                  <span
+                                    className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${statusColor(s.status)}`}
+                                  />
+                                  <span className="text-sm text-slate-700 dark:text-slate-200 truncate flex-1">
+                                    {s.summary || "新会话"}
+                                  </span>
+                                </div>
+                                <div className="mt-1 flex items-center justify-between">
+                                  <span className="text-xs text-slate-400">
+                                    {s.messageCount} 条消息
+                                  </span>
+                                  <span className="text-xs text-slate-400">
+                                    {new Date(s.createdAt).toLocaleDateString()}
+                                  </span>
+                                  {s.status === "running" && (
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        onStopSession(s.sessionId);
+                                      }}
+                                      className="text-xs text-red-500 hover:text-red-700"
+                                    >
+                                      停止
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            ))
+                          )
+                        ) : (
+                          <GitChangeList
+                            gitStatus={gitStatus}
+                            onFileClick={(filePath, staged) => onFileClick(filePath, project.path, staged)}
+                          />
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             );
           })

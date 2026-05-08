@@ -217,6 +217,9 @@ export type {
   StreamResponse,
   ChatRequest,
   ProjectsResponse,
+  GitStatusFile,
+  GitStatusResult,
+  GitDiffResult,
 } from "../../shared/types";
 
 // Re-export SDK types
@@ -310,6 +313,21 @@ export interface WSRetryWithPermissionMessage {
   nodeId?: string;
 }
 
+export interface WSGetGitStatusMessage {
+  type: "get_git_status";
+  projectPath: string;
+  projectId: string;
+  nodeId?: string;
+}
+
+export interface WSGetGitDiffMessage {
+  type: "get_git_diff";
+  projectPath: string;
+  filePath: string;
+  staged: boolean;
+  nodeId?: string;
+}
+
 export type WSBrowserMessage =
   | WSChatMessage
   | WSCreateSessionMessage
@@ -321,7 +339,9 @@ export type WSBrowserMessage =
   | WSSelectNodeMessage
   | WSListNodesMessage
   | WSAuthNodeMessage
-  | WSRetryWithPermissionMessage;
+  | WSRetryWithPermissionMessage
+  | WSGetGitStatusMessage
+  | WSGetGitDiffMessage;
 
 // 项目信息
 export interface ProjectInfo {
