@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from "react";
-import type { AllMessage, ChatMessage, SessionInfo, ProjectInfo, NodeInfo, GitStatusResult, GitDiffResult } from "../types";
+import type { AllMessage, ChatMessage, SessionInfo, ProjectInfo, NodeInfo, GitStatusResult, GitDiffResult, FileTreeNode, FileTreeResult } from "../types";
 import { useWebSocket } from "../hooks/useWebSocket";
 import { useClaudeStreaming } from "../hooks/useClaudeStreaming";
 import type { StreamingContext } from "../hooks/streaming/useMessageProcessor";
@@ -86,6 +86,9 @@ export function ChatView() {
   const [authError, setAuthError] = useState<string | null>(null);
   const [gitStatuses, setGitStatuses] = useState<Map<string, GitStatusResult>>(new Map());
   const [diffState, setDiffState] = useState<{ filePath: string; projectPath: string; staged: boolean; diff: string } | null>(null);
+  const [fileTrees, setFileTrees] = useState<Map<string, FileTreeNode[]>>(new Map());
+  const [fileTreeErrors, setFileTreeErrors] = useState<Map<string, string>>(new Map());
+  const [fileTreeLoading, setFileTreeLoading] = useState<Set<string>>(new Set());
 
   const currentAssistantMessageRef = useRef<ChatMessage | null>(null);
   const initialLoadDone = useRef(false);
@@ -377,6 +380,34 @@ export function ChatView() {
                 projectPath: dr.projectPath,
                 staged: data.staged ?? false,
                 diff: dr.diff,
+              });
+            }
+            continue;
+          }
+
+          if (data.type === "file_tree" && data.fileTreeResult) {
+            const result = data.fileTreeResult as FileTreeResult;
+            setFileTreeLoading((prev) => {
+              const next = new Set(prev);
+              next.delete(result.projectId);
+              return next;
+            });
+            if (result.error) {
+              setFileTreeErrors((prev) => {
+                const next = new Map(prev);
+                next.set(result.projectId, result.error!);
+                return next;
+              });
+            } else {
+              setFileTrees((prev) => {
+                const next = new Map(prev);
+                next.set(result.projectId, result.tree);
+                return next;
+              });
+              setFileTreeErrors((prev) => {
+                const next = new Map(prev);
+                next.delete(result.projectId);
+                return next;
               });
             }
             continue;
@@ -788,6 +819,22 @@ export function ChatView() {
     [send, activeNodeId],
   );
 
+  const handleRequestFileTree = useCallback(
+    (projectPath: string, projectId: string) => {
+      if (fileTrees.has(projectId)) return;
+      setFileTreeLoading((prev) => new Set(prev).add(projectId));
+      send({ type: "get_file_tree", projectPath, projectId, nodeId: activeNodeId || undefined });
+    },
+    [send, activeNodeId, fileTrees],
+  );
+
+  const handleFileTreeNodeClick = useCallback(
+    (_filePath: string, _projectPath: string) => {
+      // 后续可接入文件查看器或编辑器
+    },
+    [],
+  );
+
   return (
     <div className="flex h-full gap-0 relative">
       <ProjectSidebar
@@ -807,6 +854,11 @@ export function ChatView() {
         gitStatuses={gitStatuses}
         onRequestGitStatus={handleRequestGitStatus}
         onFileClick={handleFileClick}
+        fileTrees={fileTrees}
+        fileTreeErrors={fileTreeErrors}
+        fileTreeLoading={fileTreeLoading}
+        onRequestFileTree={handleRequestFileTree}
+        onFileTreeNodeClick={handleFileTreeNodeClick}
       />
       <div className="flex-1 flex flex-col min-w-0">
         {/* Toggle button bar */}

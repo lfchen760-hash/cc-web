@@ -1,6 +1,7 @@
 import { useState } from "react";
-import type { SessionInfo, ProjectInfo, GitStatusResult } from "../types";
+import type { SessionInfo, ProjectInfo, GitStatusResult, FileTreeNode } from "../types";
 import { GitChangeList } from "./GitChangeList";
+import { FileTree } from "./FileTree";
 
 interface ProjectSidebarProps {
   projects: ProjectInfo[];
@@ -19,6 +20,11 @@ interface ProjectSidebarProps {
   gitStatuses: Map<string, GitStatusResult>;
   onRequestGitStatus: (projectId: string, projectPath: string) => void;
   onFileClick: (filePath: string, projectPath: string, staged: boolean) => void;
+  fileTrees: Map<string, FileTreeNode[]>;
+  fileTreeErrors: Map<string, string>;
+  fileTreeLoading: Set<string>;
+  onRequestFileTree: (projectPath: string, projectId: string) => void;
+  onFileTreeNodeClick: (filePath: string, projectPath: string) => void;
 }
 
 function statusColor(status: string) {
@@ -49,9 +55,14 @@ export function ProjectSidebar({
   gitStatuses,
   onRequestGitStatus,
   onFileClick,
+  fileTrees,
+  fileTreeErrors,
+  fileTreeLoading,
+  onRequestFileTree,
+  onFileTreeNodeClick,
 }: ProjectSidebarProps) {
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
-  const [activeTab, setActiveTab] = useState<Map<string, 'sessions' | 'git'>>(new Map());
+  const [activeTab, setActiveTab] = useState<Map<string, 'sessions' | 'git' | 'files'>>(new Map());
 
   const toggleProject = (projectId: string, projectPath: string) => {
     setExpandedProjects((prev) => {
@@ -166,7 +177,7 @@ export function ProjectSidebar({
 
                 {isExpanded && (() => {
                   const tab = activeTab.get(project.projectId) || 'sessions';
-                  const setTab = (t: 'sessions' | 'git') => {
+                  const setTab = (t: 'sessions' | 'git' | 'files') => {
                     setActiveTab((prev) => {
                       const next = new Map(prev);
                       next.set(project.projectId, t);
@@ -214,6 +225,23 @@ export function ProjectSidebar({
                           {hasGitChanges && (
                             <span className="absolute top-0.5 right-1 w-1.5 h-1.5 rounded-full bg-emerald-500" />
                           )}
+                        </button>
+                        <button
+                          onClick={() => {
+                            setTab('files');
+                            onRequestFileTree(project.path, project.projectId);
+                          }}
+                          className={`flex flex-col items-center py-1.5 text-[10px] leading-tight rounded-sm mx-0.5 transition-colors ${
+                            tab === 'files'
+                              ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'
+                              : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50'
+                          }`}
+                          title="文件"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                          </svg>
+                          <span className="mt-0.5" style={{ writingMode: 'vertical-rl' }}>文件</span>
                         </button>
                       </div>
                       {/* Content area */}
@@ -264,11 +292,29 @@ export function ProjectSidebar({
                               </div>
                             ))
                           )
-                        ) : (
+                        ) : tab === 'git' ? (
                           <GitChangeList
                             gitStatus={gitStatus}
                             onFileClick={(filePath, staged) => onFileClick(filePath, project.path, staged)}
                           />
+                        ) : (
+                          <div className="py-1">
+                            {fileTreeLoading.has(project.projectId) ? (
+                              <p className="text-xs text-slate-400 px-3 py-4 text-center">
+                                加载中...
+                              </p>
+                            ) : fileTreeErrors.get(project.projectId) ? (
+                              <p className="text-xs text-red-400 px-3 py-4 text-center">
+                                {fileTreeErrors.get(project.projectId)}
+                              </p>
+                            ) : (
+                              <FileTree
+                                tree={fileTrees.get(project.projectId) || []}
+                                projectPath={project.path}
+                                onFileClick={onFileTreeNodeClick}
+                              />
+                            )}
+                          </div>
                         )}
                       </div>
                     </div>

@@ -16,6 +16,7 @@ import {
   deleteProject,
 } from './session-manager.js';
 import { getGitStatus, getGitDiff } from './git-utils.js';
+import { getFileTree } from './file-utils.js';
 
 // 加载持久化会话
 loadPersistedSessions();
@@ -172,6 +173,15 @@ onMessage((msg) => {
       if (!projectPath || !filePath) return;
       const result = getGitDiff(projectPath, filePath, staged);
       reply({ type: 'git_diff', diffResult: result, staged });
+      break;
+    }
+
+    case 'get_file_tree': {
+      const projectPath = msg.projectPath as string;
+      const projectId = msg.projectId as string;
+      if (!projectPath || !projectId) return;
+      const result = getFileTree(projectPath, projectId);
+      reply({ type: 'file_tree', fileTreeResult: result });
       break;
     }
   }

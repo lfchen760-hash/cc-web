@@ -78,3 +78,17 @@ export interface GitDiffResult {
   diff: string;         // unified diff text
   error?: string;
 }
+
+export interface FileTreeNode {
+  name: string;
+  path: string;
+  isDirectory: boolean;
+  children?: FileTreeNode[];
+}
+
+export interface FileTreeResult {
+  projectPath: string;
+  projectId: string;
+  tree: FileTreeNode[];
+  error?: string;
+}

@@ -1,5 +1,5 @@
 export interface BrowserMessage {
-  type: 'chat' | 'create_session' | 'stop_session' | 'list_sessions' | 'create_project' | 'delete_project' | 'list_projects' | 'select_node' | 'list_nodes' | 'retry_with_permission' | 'auth_node' | 'get_git_status' | 'get_git_diff';
+  type: 'chat' | 'create_session' | 'stop_session' | 'list_sessions' | 'create_project' | 'delete_project' | 'list_projects' | 'select_node' | 'list_nodes' | 'retry_with_permission' | 'auth_node' | 'get_git_status' | 'get_git_diff' | 'get_file_tree';
   sessionId?: string;
   text?: string;
   projectPath?: string;
@@ -14,10 +14,11 @@ export interface BrowserMessage {
   staged?: boolean;
   gitStatus?: GitStatusResult;
   diffResult?: GitDiffResult;
+  fileTreeResult?: FileTreeResult;
 }
 
 export interface LocalMessage {
-  type: 'register' | 'claude_json' | 'done' | 'error' | 'pong' | 'aborted' | 'session_info' | 'session_end' | 'sessions_list' | 'projects_list' | 'project_info' | 'retry_with_permission' | 'create_session' | 'create_project' | 'delete_project' | 'list_sessions' | 'list_projects' | 'stop_session' | 'chat' | 'auth_node' | 'auth_result' | 'get_git_status' | 'get_git_diff' | 'git_status' | 'git_diff';
+  type: 'register' | 'claude_json' | 'done' | 'error' | 'pong' | 'aborted' | 'session_info' | 'session_end' | 'sessions_list' | 'projects_list' | 'project_info' | 'retry_with_permission' | 'create_session' | 'create_project' | 'delete_project' | 'list_sessions' | 'list_projects' | 'stop_session' | 'chat' | 'auth_node' | 'auth_result' | 'get_git_status' | 'get_git_diff' | 'git_status' | 'git_diff' | 'get_file_tree' | 'file_tree';
   sessionId?: string;
   data?: unknown;
   error?: string;
@@ -41,10 +42,11 @@ export interface LocalMessage {
   staged?: boolean;
   gitStatus?: GitStatusResult;
   diffResult?: GitDiffResult;
+  fileTreeResult?: FileTreeResult;
 }
 
 export interface RelayMessage {
-  type: 'claude_json' | 'done' | 'error' | 'aborted' | 'session_info' | 'session_end' | 'sessions_list' | 'projects_list' | 'project_info' | 'nodes_list' | 'node_selected' | 'auth_result' | 'git_status' | 'git_diff';
+  type: 'claude_json' | 'done' | 'error' | 'aborted' | 'session_info' | 'session_end' | 'sessions_list' | 'projects_list' | 'project_info' | 'nodes_list' | 'node_selected' | 'auth_result' | 'git_status' | 'git_diff' | 'file_tree';
   sessionId?: string;
   nodeId?: string;
   data?: unknown;
@@ -56,6 +58,7 @@ export interface RelayMessage {
   success?: boolean;
   gitStatus?: GitStatusResult;
   diffResult?: GitDiffResult;
+  fileTreeResult?: FileTreeResult;
 }
 
 export interface ProjectInfo {
@@ -98,5 +101,19 @@ export interface GitDiffResult {
   projectPath: string;
   filePath: string;
   diff: string;
+  error?: string;
+}
+
+export interface FileTreeNode {
+  name: string;
+  path: string;
+  isDirectory: boolean;
+  children?: FileTreeNode[];
+}
+
+export interface FileTreeResult {
+  projectPath: string;
+  projectId: string;
+  tree: FileTreeNode[];
   error?: string;
 }
