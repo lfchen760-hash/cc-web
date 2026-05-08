@@ -1,6 +1,6 @@
-import { readdirSync, statSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import type { FileTreeNode, FileTreeResult } from "./types.js";
+import type { FileTreeNode, FileTreeResult, FileContentResult } from "./types.js";
 
 const SKIP_PATTERNS = [
   ".git",
@@ -93,4 +93,102 @@ export function getFileTree(
     result.error = (err as Error).message;
   }
   return result;
+}
+
+const LANG_MAP: Record<string, string> = {
+  ".java": "java",
+  ".ts": "typescript",
+  ".tsx": "typescript",
+  ".js": "javascript",
+  ".jsx": "javascript",
+  ".py": "python",
+  ".go": "go",
+  ".json": "json",
+  ".css": "css",
+  ".scss": "scss",
+  ".xml": "markup",
+  ".svg": "markup",
+  ".html": "markup",
+  ".htm": "markup",
+  ".yaml": "yaml",
+  ".yml": "yaml",
+  ".sql": "sql",
+  ".sh": "bash",
+  ".bash": "bash",
+  ".c": "c",
+  ".h": "c",
+  ".cpp": "cpp",
+  ".hpp": "cpp",
+  ".rs": "rust",
+  ".toml": "toml",
+  ".ini": "ini",
+  ".cfg": "ini",
+  ".md": "markdown",
+  ".markdown": "markdown",
+  ".txt": "text",
+  ".env": "text",
+  ".gitignore": "text",
+};
+
+const MAX_FILE_SIZE = 1024 * 1024; // 1MB
+
+export function getFileContent(
+  projectPath: string,
+  filePath: string,
+): FileContentResult {
+  const ext = filePath.includes(".")
+    ? filePath.slice(filePath.lastIndexOf(".")).toLowerCase()
+    : "";
+
+  if (SKIP_EXTENSIONS.has(ext)) {
+    return { projectPath, filePath, content: "", mimeType: "binary" };
+  }
+
+  const absPath = join(projectPath, filePath);
+
+  try {
+    const stat = statSync(absPath);
+    if (stat.size > MAX_FILE_SIZE) {
+      return {
+        projectPath,
+        filePath,
+        content: "",
+        mimeType: "binary",
+        error: `文件过大 (${(stat.size / 1024 / 1024).toFixed(1)}MB)，超过 1MB 限制`,
+      };
+    }
+  } catch (err) {
+    return {
+      projectPath,
+      filePath,
+      content: "",
+      mimeType: "text",
+      error: (err as Error).message,
+    };
+  }
+
+  let content: string;
+  try {
+    content = readFileSync(absPath, "utf-8");
+  } catch (err) {
+    return {
+      projectPath,
+      filePath,
+      content: "",
+      mimeType: "text",
+      error: (err as Error).message,
+    };
+  }
+
+  const lang = LANG_MAP[ext];
+  if (lang === "markdown") {
+    return { projectPath, filePath, content, mimeType: "markdown" };
+  }
+  if (ext === ".html" || ext === ".htm") {
+    return { projectPath, filePath, content, mimeType: "html" };
+  }
+  if (lang && lang !== "text") {
+    return { projectPath, filePath, content, mimeType: "code", language: lang };
+  }
+  return { projectPath, filePath, content, mimeType: "text" };
 }

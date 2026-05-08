@@ -92,3 +92,12 @@ export interface FileTreeResult {
   tree: FileTreeNode[];
   error?: string;
 }
+
+export interface FileContentResult {
+  projectPath: string;
+  filePath: string;
+  content: string;
+  mimeType: 'markdown' | 'html' | 'code' | 'text' | 'binary';
+  language?: string;
+  error?: string;
+}

@@ -323,6 +323,22 @@ function handleBrowserMessage(ws: WebSocket, msg: BrowserMessage): void {
       send(node.ws, { type: 'get_file_tree', projectPath: msg.projectPath, projectId: msg.projectId });
       break;
     }
+
+    case 'get_file_content': {
+      const targetNode = msg.nodeId || getNodeIdForBrowser(ws);
+      if (!targetNode) {
+        send(ws, { type: 'error', error: '未选择节点' });
+        return;
+      }
+      const node = localNodes.get(targetNode);
+      if (!node) return;
+      if (!isAuthenticated(ws, targetNode)) {
+        send(ws, { type: 'error', error: `节点 ${targetNode} 需要密码认证` });
+        return;
+      }
+      send(node.ws, { type: 'get_file_content', projectPath: msg.projectPath, filePath: msg.filePath });
+      break;
+    }
   }
 }
 
@@ -448,7 +464,8 @@ function handleLocalMessage(ws: WebSocket, msg: LocalMessage): void {
     case 'project_info':
     case 'git_status':
     case 'git_diff':
-    case 'file_tree': {
+    case 'file_tree':
+    case 'file_content': {
       const nodeId = (ws as unknown as Record<string, unknown>)._nodeId as string;
       broadcastToAllBrowsers({ ...msg, nodeId });
       break;

@@ -16,7 +16,7 @@ import {
   deleteProject,
 } from './session-manager.js';
 import { getGitStatus, getGitDiff } from './git-utils.js';
-import { getFileTree } from './file-utils.js';
+import { getFileTree, getFileContent } from './file-utils.js';
 
 // 加载持久化会话
 loadPersistedSessions();
@@ -182,6 +182,15 @@ onMessage((msg) => {
       if (!projectPath || !projectId) return;
       const result = getFileTree(projectPath, projectId);
       reply({ type: 'file_tree', fileTreeResult: result });
+      break;
+    }
+
+    case 'get_file_content': {
+      const projectPath = msg.projectPath as string;
+      const filePath = msg.filePath as string;
+      if (!projectPath || !filePath) return;
+      const result = getFileContent(projectPath, filePath);
+      reply({ type: 'file_content', fileContentResult: result });
       break;
     }
   }

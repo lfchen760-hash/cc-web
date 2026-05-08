@@ -9,5 +9,11 @@
     "dev:local": "npm -w packages/local run dev",
     "dev:frontend": "npm -w packages/frontend run dev",
     "build:frontend": "npm -w packages/frontend run build"
+  },
+  "dependencies": {
+    "react-syntax-highlighter": "^15.6.6"
+  },
+  "devDependencies": {
+    "@types/react-syntax-highlighter": "^15.5.13"
   }
 }

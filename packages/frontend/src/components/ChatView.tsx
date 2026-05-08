@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from "react";
-import type { AllMessage, ChatMessage, SessionInfo, ProjectInfo, NodeInfo, GitStatusResult, GitDiffResult, FileTreeNode, FileTreeResult } from "../types";
+import type { AllMessage, ChatMessage, SessionInfo, ProjectInfo, NodeInfo, GitStatusResult, GitDiffResult, FileTreeNode, FileTreeResult, FileContentResult } from "../types";
 import { useWebSocket } from "../hooks/useWebSocket";
 import { useClaudeStreaming } from "../hooks/useClaudeStreaming";
 import type { StreamingContext } from "../hooks/streaming/useMessageProcessor";
@@ -11,6 +11,7 @@ import { StatusBar } from "./StatusBar";
 import { ModelPicker } from "./ModelPicker";
 import { PermissionDialog } from "./PermissionDialog";
 import { GitDiffModal } from "./GitDiffModal";
+import { FileViewerModal } from "./FileViewerModal";
 
 // 去重：result 消息的文本与它前面的 assistant 消息相同，批量加载时会产生重复
 function dedupConsecutiveAssistant(messages: AllMessage[]): AllMessage[] {
@@ -89,6 +90,13 @@ export function ChatView() {
   const [fileTrees, setFileTrees] = useState<Map<string, FileTreeNode[]>>(new Map());
   const [fileTreeErrors, setFileTreeErrors] = useState<Map<string, string>>(new Map());
   const [fileTreeLoading, setFileTreeLoading] = useState<Set<string>>(new Set());
+  const [fileViewState, setFileViewState] = useState<{
+    filePath: string;
+    projectPath: string;
+    content: string;
+    mimeType: "markdown" | "html" | "code" | "text" | "binary";
+    language?: string;
+  } | null>(null);
 
   const currentAssistantMessageRef = useRef<ChatMessage | null>(null);
   const initialLoadDone = useRef(false);
@@ -408,6 +416,20 @@ export function ChatView() {
                 const next = new Map(prev);
                 next.delete(result.projectId);
                 return next;
+              });
+            }
+            continue;
+          }
+
+          if (data.type === "file_content" && data.fileContentResult) {
+            const r = data.fileContentResult as FileContentResult;
+            if (!r.error) {
+              setFileViewState({
+                filePath: r.filePath,
+                projectPath: r.projectPath,
+                content: r.content,
+                mimeType: r.mimeType,
+                language: r.language,
               });
             }
             continue;
@@ -829,10 +851,10 @@ export function ChatView() {
   );
 
   const handleFileTreeNodeClick = useCallback(
-    (_filePath: string, _projectPath: string) => {
-      // 后续可接入文件查看器或编辑器
+    (filePath: string, projectPath: string) => {
+      send({ type: "get_file_content", projectPath, filePath, nodeId: activeNodeId || undefined });
     },
-    [],
+    [send, activeNodeId],
   );
 
   return (
@@ -992,6 +1014,15 @@ export function ChatView() {
         staged={diffState?.staged ?? false}
         diffText={diffState?.diff || ""}
         onClose={() => setDiffState(null)}
+      />
+
+      <FileViewerModal
+        isOpen={!!fileViewState}
+        filePath={fileViewState?.filePath || ""}
+        content={fileViewState?.content || ""}
+        mimeType={fileViewState?.mimeType || "text"}
+        language={fileViewState?.language}
+        onClose={() => setFileViewState(null)}
       />
     </div>
   );

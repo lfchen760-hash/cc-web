@@ -222,6 +222,7 @@ export type {
   GitDiffResult,
   FileTreeNode,
   FileTreeResult,
+  FileContentResult,
 } from "../../shared/types";
 
 // Re-export SDK types
@@ -337,6 +338,13 @@ export interface WSGetFileTreeMessage {
   nodeId?: string;
 }
 
+export interface WSGetFileContentMessage {
+  type: "get_file_content";
+  projectPath: string;
+  filePath: string;
+  nodeId?: string;
+}
+
 export type WSBrowserMessage =
   | WSChatMessage
   | WSCreateSessionMessage
@@ -351,7 +359,8 @@ export type WSBrowserMessage =
   | WSRetryWithPermissionMessage
   | WSGetGitStatusMessage
   | WSGetGitDiffMessage
-  | WSGetFileTreeMessage;
+  | WSGetFileTreeMessage
+  | WSGetFileContentMessage;
 
 // 项目信息
 export interface ProjectInfo {

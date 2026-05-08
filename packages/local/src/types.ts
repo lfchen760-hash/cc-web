@@ -48,6 +48,7 @@ export interface WSMessage {
   gitStatus?: GitStatusResult;
   diffResult?: GitDiffResult;
   fileTreeResult?: FileTreeResult;
+  fileContentResult?: FileContentResult;
 }
 
 export interface GitStatusFile {
@@ -85,5 +86,14 @@ export interface FileTreeResult {
   projectPath: string;
   projectId: string;
   tree: FileTreeNode[];
+  error?: string;
+}
+
+export interface FileContentResult {
+  projectPath: string;
+  filePath: string;
+  content: string;
+  mimeType: 'markdown' | 'html' | 'code' | 'text' | 'binary';
+  language?: string;
   error?: string;
 }
