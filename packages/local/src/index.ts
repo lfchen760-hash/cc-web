@@ -14,6 +14,7 @@ import {
   createProject,
   listProjects,
   deleteProject,
+  deleteSession,
 } from './session-manager.js';
 import { getGitStatus, getGitDiff } from './git-utils.js';
 import { getFileTree, getFileContent } from './file-utils.js';
@@ -131,6 +132,20 @@ onMessage((msg) => {
     case 'stop_session': {
       const sid = msg.sessionId as string;
       if (sid) stopSession(sid);
+      break;
+    }
+
+    case 'delete_session': {
+      const sid = msg.sessionId as string;
+      if (!sid) return;
+      const ok = deleteSession(sid);
+      if (ok) {
+        console.log(`会话已删除: ${sid.substring(0, 8)}`);
+        const sessions = listSessions();
+        send({ type: 'sessions_list', sessions: sessions.map((s) => ({ ...s, messages: getHistory(s.sessionId) || [] })) });
+        const projects = listProjects();
+        send({ type: 'projects_list', projects });
+      }
       break;
     }
 

@@ -617,6 +617,18 @@ export function ChatView() {
     [send, activeNodeId],
   );
 
+  const handleDeleteSession = useCallback(
+    (sessionId: string) => {
+      send({ type: "delete_session", sessionId, nodeId: activeNodeId || undefined });
+      if (activeSessionId === sessionId) {
+        setActiveSessionId(null);
+        setMessages([]);
+        setHasReceivedInit(false);
+      }
+    },
+    [send, activeNodeId, activeSessionId],
+  );
+
   const handleCreateSession = useCallback(
     (projectId: string, projectPath: string) => {
       // acceptEdits: 自动批准文件读写，Bash 等操作仍需确认
@@ -869,6 +881,7 @@ export function ChatView() {
         onCreateProject={handleCreateProject}
         onCreateSession={handleCreateSession}
         onDeleteProject={handleDeleteProject}
+        onDeleteSession={handleDeleteSession}
         onStopSession={handleStopSession}
         isOpen={sidebarOpen}
         isMobile={isMobile}

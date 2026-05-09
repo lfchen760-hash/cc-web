@@ -13,6 +13,7 @@ interface ProjectSidebarProps {
   onCreateProject: (name: string, path: string) => void;
   onCreateSession: (projectId: string, projectPath: string) => void;
   onDeleteProject: (projectId: string) => void;
+  onDeleteSession: (sessionId: string) => void;
   onStopSession: (sessionId: string) => void;
   isOpen: boolean;
   isMobile: boolean;
@@ -48,6 +49,7 @@ export function ProjectSidebar({
   onCreateProject,
   onCreateSession,
   onDeleteProject,
+  onDeleteSession,
   onStopSession,
   isOpen,
   isMobile,
@@ -61,21 +63,18 @@ export function ProjectSidebar({
   onRequestFileTree,
   onFileTreeNodeClick,
 }: ProjectSidebarProps) {
-  const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
   const [activeTab, setActiveTab] = useState<Map<string, 'sessions' | 'git' | 'files'>>(new Map());
 
-  const toggleProject = (projectId: string, projectPath: string) => {
-    setExpandedProjects((prev) => {
-      const next = new Set(prev);
-      if (next.has(projectId)) {
-        next.delete(projectId);
-      } else {
-        next.add(projectId);
-        onRequestGitStatus(projectId, projectPath);
-      }
+  const activeProject = projects.find((p) => p.projectId === activeProjectId);
+  const tab = activeTab.get(activeProjectId || '') || 'sessions';
+
+  const setTab = (t: 'sessions' | 'git' | 'files') => {
+    if (!activeProjectId) return;
+    setActiveTab((prev) => {
+      const next = new Map(prev);
+      next.set(activeProjectId, t);
       return next;
     });
-    onSelectProject(projectId);
   };
 
   const handleCreateProject = () => {
@@ -86,13 +85,9 @@ export function ProjectSidebar({
     onCreateProject(name, projectPath);
   };
 
-  const handleCreateSession = (project: ProjectInfo) => {
-    onCreateSession(project.projectId, project.path);
-    setExpandedProjects((prev) => {
-      const next = new Set(prev);
-      next.add(project.projectId);
-      return next;
-    });
+  const handleCreateSession = () => {
+    if (!activeProject) return;
+    onCreateSession(activeProject.projectId, activeProject.path);
   };
 
   const handleSelectSession = (sessionId: string, projectId: string) => {
@@ -100,240 +95,340 @@ export function ProjectSidebar({
     if (isMobile) onClose();
   };
 
-  const getSessionsForProject = (projectId: string): SessionInfo[] => {
-    return sessions
-      .filter((s) => s.projectId === projectId)
-      .sort((a, b) => b.createdAt - a.createdAt);
-  };
+  const projectSessions = activeProjectId
+    ? sessions
+        .filter((s) => s.projectId === activeProjectId)
+        .sort((a, b) => b.createdAt - a.createdAt)
+    : [];
+
+  const gitStatus = activeProjectId ? gitStatuses.get(activeProjectId) : undefined;
+  const hasGitChanges =
+    gitStatus &&
+    gitStatus.isGitRepo &&
+    (gitStatus.staged.length > 0 ||
+      gitStatus.unstaged.length > 0 ||
+      gitStatus.untracked.length > 0);
 
   const sidebarContent = (
     <div className="h-full flex flex-col bg-white/80 dark:bg-slate-800/80 border-r border-slate-200 dark:border-slate-700">
-      <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">
-          项目列表
-        </h2>
-        {isMobile && (
-          <button
-            onClick={onClose}
-            className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+      {/* Header with project dropdown */}
+      <div className="p-3 border-b border-slate-200 dark:border-slate-700">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium text-slate-600 dark:text-slate-300 whitespace-nowrap">
+            项目
+          </span>
+          <select
+            value={activeProjectId || ""}
+            onChange={(e) => {
+              const projectId = e.target.value;
+              if (projectId) {
+                onSelectProject(projectId);
+                const project = projects.find((p) => p.projectId === projectId);
+                if (project) {
+                  onRequestGitStatus(projectId, project.path);
+                }
+              }
+            }}
+            className="flex-1 min-w-0 text-sm border border-slate-300 dark:border-slate-600 rounded px-2 py-1.5 bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-200 truncate cursor-pointer focus:outline-none focus:ring-1 focus:ring-blue-500"
           >
-            ✕
+            <option value="" disabled>
+              选择项目...
+            </option>
+            {Array.isArray(projects) &&
+              projects.map((p) => (
+                <option key={p.projectId} value={p.projectId}>
+                  {p.name}
+                </option>
+              ))}
+          </select>
+          <button
+            onClick={handleCreateProject}
+            className="flex-shrink-0 p-1.5 text-blue-500 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded transition-colors"
+            title="新建项目"
+          >
+            <svg
+              className="w-4 h-4"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M12 4v16m8-8H4"
+              />
+            </svg>
           </button>
+          {isMobile && (
+            <button
+              onClick={onClose}
+              className="flex-shrink-0 p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 rounded transition-colors"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+
+        {/* Selected project info bar */}
+        {activeProject && (
+          <div className="mt-2 flex items-center gap-2">
+            <span className="text-sm text-slate-600 dark:text-slate-300 truncate flex-1">
+              {activeProject.name}
+            </span>
+            <button
+              onClick={() => {
+                if (
+                  confirm(
+                    `确定删除项目 "${activeProject.name}" 及其所有会话？`,
+                  )
+                ) {
+                  onDeleteProject(activeProject.projectId);
+                }
+              }}
+              className="flex-shrink-0 p-1 text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded transition-colors"
+              title="删除项目"
+            >
+              <svg
+                className="w-4 h-4"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                />
+              </svg>
+            </button>
+          </div>
         )}
       </div>
 
-      <div className="flex-1 overflow-y-auto p-2">
-        {!Array.isArray(projects) || projects.length === 0 ? (
-          <p className="text-sm text-slate-500 dark:text-slate-400 text-center mt-8">
-            暂无项目，点击下方按钮新建
-          </p>
-        ) : (
-          projects.map((project) => {
-            const isExpanded = expandedProjects.has(project.projectId);
-            const projectSessions = getSessionsForProject(project.projectId);
-
-            return (
-              <div key={project.projectId} className="mb-1">
-                <div
-                  onClick={() => toggleProject(project.projectId, project.path)}
-                  className={`flex items-center gap-2 p-2.5 rounded-lg cursor-pointer transition-colors ${
-                    activeProjectId === project.projectId
-                      ? "bg-blue-50 dark:bg-blue-900/30"
-                      : "hover:bg-slate-50 dark:hover:bg-slate-700/50"
-                  }`}
+      {/* Tab bar + Content (only when a project is selected) */}
+      {activeProject ? (
+        <>
+          {/* Vertical tab bar */}
+          <div className="flex flex-1 overflow-hidden border-b border-slate-200 dark:border-slate-700">
+            <div className="flex flex-col w-9 border-r border-slate-200 dark:border-slate-700 py-1 gap-0.5 flex-shrink-0">
+              <button
+                onClick={() => setTab("sessions")}
+                className={`flex flex-col items-center py-1.5 text-[10px] leading-tight rounded-sm mx-0.5 transition-colors ${
+                  tab === "sessions"
+                    ? "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
+                    : "text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50"
+                }`}
+                title="会话"
+              >
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
                 >
-                  <span className="text-sm text-slate-400">
-                    {isExpanded ? "▼" : "▶"}
-                  </span>
-                  <span className="text-sm font-medium text-slate-700 dark:text-slate-200 truncate flex-1">
-                    {project.name}
-                  </span>
-                  <span className="text-xs text-slate-400">
-                    {project.sessionCount}
-                  </span>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleCreateSession(project);
-                    }}
-                    className="text-xs px-2 py-0.5 bg-blue-500 text-white rounded hover:bg-blue-600"
-                    title="新建会话"
-                  >
-                    +
-                  </button>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (confirm(`确定删除项目 "${project.name}" 及其所有会话？`)) {
-                        onDeleteProject(project.projectId);
-                      }
-                    }}
-                    className="text-xs text-red-400 hover:text-red-600"
-                    title="删除项目"
-                  >
-                    ✕
-                  </button>
-                </div>
-
-                {isExpanded && (() => {
-                  const tab = activeTab.get(project.projectId) || 'sessions';
-                  const setTab = (t: 'sessions' | 'git' | 'files') => {
-                    setActiveTab((prev) => {
-                      const next = new Map(prev);
-                      next.set(project.projectId, t);
-                      return next;
-                    });
-                  };
-                  const gitStatus = gitStatuses.get(project.projectId);
-                  const hasGitChanges = gitStatus && gitStatus.isGitRepo && (
-                    gitStatus.staged.length > 0 ||
-                    gitStatus.unstaged.length > 0 ||
-                    gitStatus.untracked.length > 0
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"
+                  />
+                </svg>
+                <span className="mt-0.5" style={{ writingMode: "vertical-rl" }}>
+                  会话
+                </span>
+              </button>
+              <button
+                onClick={() => {
+                  setTab("git");
+                  onRequestGitStatus(
+                    activeProject.projectId,
+                    activeProject.path,
                   );
+                }}
+                className={`flex flex-col items-center py-1.5 text-[10px] leading-tight rounded-sm mx-0.5 transition-colors relative ${
+                  tab === "git"
+                    ? "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
+                    : "text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50"
+                }`}
+                title="Git"
+              >
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M12 13l-3 3m0 0l3 3m-3-3h8"
+                  />
+                </svg>
+                <span className="mt-0.5" style={{ writingMode: "vertical-rl" }}>
+                  Git
+                </span>
+                {hasGitChanges && (
+                  <span className="absolute top-0.5 right-1 w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                )}
+              </button>
+              <button
+                onClick={() => {
+                  setTab("files");
+                  onRequestFileTree(
+                    activeProject.path,
+                    activeProject.projectId,
+                  );
+                }}
+                className={`flex flex-col items-center py-1.5 text-[10px] leading-tight rounded-sm mx-0.5 transition-colors ${
+                  tab === "files"
+                    ? "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
+                    : "text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50"
+                }`}
+                title="文件"
+              >
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
+                  />
+                </svg>
+                <span className="mt-0.5" style={{ writingMode: "vertical-rl" }}>
+                  文件
+                </span>
+              </button>
+            </div>
 
-                  return (
-                    <div className="ml-6 flex border-l border-slate-200 dark:border-slate-700">
-                      {/* Vertical tab bar */}
-                      <div className="flex flex-col w-9 border-r border-slate-200 dark:border-slate-700 py-1 gap-0.5 flex-shrink-0">
-                        <button
-                          onClick={() => setTab('sessions')}
-                          className={`flex flex-col items-center py-1.5 text-[10px] leading-tight rounded-sm mx-0.5 transition-colors ${
-                            tab === 'sessions'
-                              ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'
-                              : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50'
+            {/* Content area */}
+            <div className="flex-1 min-w-0 flex flex-col">
+              <div className="flex-1 overflow-y-auto">
+                {tab === "sessions" ? (
+                  <div className="p-1">
+                    {projectSessions.length === 0 ? (
+                      <p className="text-xs text-slate-400 px-3 py-4 text-center">
+                        暂无会话
+                      </p>
+                    ) : (
+                      projectSessions.map((s) => (
+                        <div
+                          key={s.sessionId}
+                          onClick={() =>
+                            handleSelectSession(
+                              s.sessionId,
+                              activeProject.projectId,
+                            )
+                          }
+                          className={`mb-0.5 p-2.5 rounded-lg cursor-pointer transition-colors ${
+                            activeSessionId === s.sessionId
+                              ? "bg-blue-100 dark:bg-blue-800/40 border border-blue-300 dark:border-blue-600"
+                              : "hover:bg-slate-50 dark:hover:bg-slate-700/50 border border-transparent"
                           }`}
-                          title="会话"
                         >
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
-                          </svg>
-                          <span className="mt-0.5" style={{ writingMode: 'vertical-rl' }}>会话</span>
-                        </button>
-                        <button
-                          onClick={() => setTab('git')}
-                          className={`flex flex-col items-center py-1.5 text-[10px] leading-tight rounded-sm mx-0.5 transition-colors relative ${
-                            tab === 'git'
-                              ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'
-                              : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50'
-                          }`}
-                          title="Git"
-                        >
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M12 13l-3 3m0 0l3 3m-3-3h8" />
-                          </svg>
-                          <span className="mt-0.5" style={{ writingMode: 'vertical-rl' }}>Git</span>
-                          {hasGitChanges && (
-                            <span className="absolute top-0.5 right-1 w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                          )}
-                        </button>
-                        <button
-                          onClick={() => {
-                            setTab('files');
-                            onRequestFileTree(project.path, project.projectId);
-                          }}
-                          className={`flex flex-col items-center py-1.5 text-[10px] leading-tight rounded-sm mx-0.5 transition-colors ${
-                            tab === 'files'
-                              ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'
-                              : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50'
-                          }`}
-                          title="文件"
-                        >
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-                          </svg>
-                          <span className="mt-0.5" style={{ writingMode: 'vertical-rl' }}>文件</span>
-                        </button>
-                      </div>
-                      {/* Content area */}
-                      <div className="flex-1 min-w-0">
-                        {tab === 'sessions' ? (
-                          projectSessions.length === 0 ? (
-                            <p className="text-xs text-slate-400 px-3 py-2">
-                              暂无会话
-                            </p>
-                          ) : (
-                            projectSessions.map((s) => (
-                              <div
-                                key={s.sessionId}
-                                onClick={() => handleSelectSession(s.sessionId, project.projectId)}
-                                className={`ml-1 mb-0.5 p-2.5 rounded-lg cursor-pointer transition-colors ${
-                                  activeSessionId === s.sessionId
-                                    ? "bg-blue-100 dark:bg-blue-800/40 border border-blue-300 dark:border-blue-600"
-                                    : "hover:bg-slate-50 dark:hover:bg-slate-700/50 border border-transparent"
-                                }`}
+                          <div className="flex items-center gap-2">
+                            <span
+                              className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${statusColor(s.status)}`}
+                            />
+                            <span className="text-sm text-slate-700 dark:text-slate-200 truncate flex-1">
+                              {s.summary || "新会话"}
+                            </span>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (confirm("确定删除该会话？")) {
+                                  onDeleteSession(s.sessionId);
+                                }
+                              }}
+                              className="text-xs text-red-400 hover:text-red-600 flex-shrink-0 px-1"
+                              title="删除会话"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                          <div className="mt-1 flex items-center justify-between">
+                            <span className="text-xs text-slate-400">
+                              {s.messageCount} 条消息
+                            </span>
+                            <span className="text-xs text-slate-400">
+                              {new Date(s.createdAt).toLocaleDateString()}
+                            </span>
+                            {s.status === "running" && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onStopSession(s.sessionId);
+                                }}
+                                className="text-xs text-red-500 hover:text-red-700"
                               >
-                                <div className="flex items-center gap-2">
-                                  <span
-                                    className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${statusColor(s.status)}`}
-                                  />
-                                  <span className="text-sm text-slate-700 dark:text-slate-200 truncate flex-1">
-                                    {s.summary || "新会话"}
-                                  </span>
-                                </div>
-                                <div className="mt-1 flex items-center justify-between">
-                                  <span className="text-xs text-slate-400">
-                                    {s.messageCount} 条消息
-                                  </span>
-                                  <span className="text-xs text-slate-400">
-                                    {new Date(s.createdAt).toLocaleDateString()}
-                                  </span>
-                                  {s.status === "running" && (
-                                    <button
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        onStopSession(s.sessionId);
-                                      }}
-                                      className="text-xs text-red-500 hover:text-red-700"
-                                    >
-                                      停止
-                                    </button>
-                                  )}
-                                </div>
-                              </div>
-                            ))
-                          )
-                        ) : tab === 'git' ? (
-                          <GitChangeList
-                            gitStatus={gitStatus}
-                            onFileClick={(filePath, staged) => onFileClick(filePath, project.path, staged)}
-                          />
-                        ) : (
-                          <div className="py-1">
-                            {fileTreeLoading.has(project.projectId) ? (
-                              <p className="text-xs text-slate-400 px-3 py-4 text-center">
-                                加载中...
-                              </p>
-                            ) : fileTreeErrors.get(project.projectId) ? (
-                              <p className="text-xs text-red-400 px-3 py-4 text-center">
-                                {fileTreeErrors.get(project.projectId)}
-                              </p>
-                            ) : (
-                              <FileTree
-                                tree={fileTrees.get(project.projectId) || []}
-                                projectPath={project.path}
-                                onFileClick={onFileTreeNodeClick}
-                              />
+                                停止
+                              </button>
                             )}
                           </div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })()}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                ) : tab === "git" ? (
+                  <GitChangeList
+                    gitStatus={gitStatus}
+                    onFileClick={(filePath, staged) =>
+                      onFileClick(filePath, activeProject.path, staged)
+                    }
+                  />
+                ) : (
+                  <div className="py-1">
+                    {fileTreeLoading.has(activeProject.projectId) ? (
+                      <p className="text-xs text-slate-400 px-3 py-4 text-center">
+                        加载中...
+                      </p>
+                    ) : fileTreeErrors.get(activeProject.projectId) ? (
+                      <p className="text-xs text-red-400 px-3 py-4 text-center">
+                        {fileTreeErrors.get(activeProject.projectId)}
+                      </p>
+                    ) : (
+                      <FileTree
+                        tree={
+                          fileTrees.get(activeProject.projectId) || []
+                        }
+                        projectPath={activeProject.path}
+                        onFileClick={onFileTreeNodeClick}
+                      />
+                    )}
+                  </div>
+                )}
               </div>
-            );
-          })
-        )}
-      </div>
-
-      <div className="p-3 border-t border-slate-200 dark:border-slate-700">
-        <button
-          onClick={handleCreateProject}
-          className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
-        >
-          + 新建项目
-        </button>
-      </div>
+              {/* New session button fixed at bottom of sessions tab */}
+              {tab === "sessions" && (
+                <div className="p-3 border-t border-slate-200 dark:border-slate-700 flex-shrink-0">
+                  <button
+                    onClick={handleCreateSession}
+                    className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
+                  >
+                    + 新建会话
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </>
+      ) : (
+        /* Empty state when no project selected */
+        <div className="flex-1 flex items-center justify-center p-4">
+          <p className="text-sm text-slate-400 dark:text-slate-500 text-center">
+            {!Array.isArray(projects) || projects.length === 0
+              ? "暂无项目，点击上方 ＋ 新建"
+              : "请选择一个项目"}
+          </p>
+        </div>
+      )}
     </div>
   );
 
@@ -365,9 +460,7 @@ export function ProjectSidebar({
         isOpen ? "w-[300px]" : "w-0"
       }`}
     >
-      <div className="w-[300px] h-full">
-        {sidebarContent}
-      </div>
+      <div className="w-[300px] h-full">{sidebarContent}</div>
     </div>
   );
 }

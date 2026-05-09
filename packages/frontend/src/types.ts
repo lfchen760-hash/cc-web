@@ -276,6 +276,12 @@ export interface WSStopSessionMessage {
   nodeId?: string;
 }
 
+export interface WSDeleteSessionMessage {
+  type: "delete_session";
+  sessionId: string;
+  nodeId?: string;
+}
+
 export interface WSListSessionsMessage {
   type: "list_sessions";
   projectId?: string;
@@ -349,6 +355,7 @@ export type WSBrowserMessage =
   | WSChatMessage
   | WSCreateSessionMessage
   | WSStopSessionMessage
+  | WSDeleteSessionMessage
   | WSListSessionsMessage
   | WSCreateProjectMessage
   | WSDeleteProjectMessage

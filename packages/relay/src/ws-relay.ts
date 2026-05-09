@@ -166,6 +166,22 @@ function handleBrowserMessage(ws: WebSocket, msg: BrowserMessage): void {
       break;
     }
 
+    case 'delete_session': {
+      const nodeId = msg.sessionId ? sessionNodeMap.get(msg.sessionId) : null;
+      const targetNode = nodeId || getNodeIdForBrowser(ws);
+      if (targetNode && msg.sessionId) {
+        const node = localNodes.get(targetNode);
+        if (node) {
+          if (!isAuthenticated(ws, targetNode)) {
+            send(ws, { type: 'error', error: `节点 ${targetNode} 需要密码认证` });
+            return;
+          }
+          send(node.ws, { type: 'delete_session', sessionId: msg.sessionId });
+        }
+      }
+      break;
+    }
+
     case 'list_sessions': {
       const targetNode = msg.nodeId || getNodeIdForBrowser(ws);
       if (!targetNode) {
