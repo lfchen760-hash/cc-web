@@ -1,5 +1,5 @@
 import { start, onMessage, send } from './ws-client.js';
-import { NODE_PASSWORD, NODE_ID } from './config.js';
+import { NODE_PASSWORD, NODE_ID, FORCE_PERMISSION_MODE } from './config.js';
 import {
   createSession,
   sendMessage,
@@ -39,7 +39,7 @@ onMessage((msg) => {
     case 'chat': {
       let sessionId = msg.sessionId as string | undefined;
       const text = msg.text as string | undefined;
-      const permMode = msg.permissionMode as string | undefined;
+      const permMode = FORCE_PERMISSION_MODE || (msg.permissionMode as string) || undefined;
       if (!text) return;
 
       // 必须有有效的项目和会话，不允许自动创建
@@ -105,7 +105,7 @@ onMessage((msg) => {
       const projectId = (msg.projectId as string) || '';
       const projectPath = msg.projectPath as string;
       const model = (msg.model as string) || undefined;
-      const permissionMode = (msg.permissionMode as string) || undefined;
+      const permissionMode = FORCE_PERMISSION_MODE || (msg.permissionMode as string) || undefined;
       if (!projectId) {
         reply({ type: 'error', error: '创建会话需要指定 projectId' });
         return;
@@ -124,7 +124,7 @@ onMessage((msg) => {
 
     case 'retry_with_permission': {
       const sid = msg.sessionId as string;
-      const permMode = (msg.permissionMode as string) || "bypassPermissions";
+      const permMode = FORCE_PERMISSION_MODE || (msg.permissionMode as string) || "bypassPermissions";
       if (sid) retryWithPermission(sid, permMode);
       break;
     }
