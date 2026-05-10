@@ -1,4 +1,5 @@
 import { spawn, execSync, type ChildProcess } from 'node:child_process';
+import { accessSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import type { StreamResponse } from './types.js';
 
@@ -77,10 +78,32 @@ export class SessionRunner {
     try {
       const isWindows = process.platform === 'win32';
       const env = { ...process.env };
-      if (isWindows && !env.CLAUDE_CODE_GIT_BASH_PATH) {
-        env.CLAUDE_CODE_GIT_BASH_PATH = String.raw`D:\Program Files\Git\bin\bash.exe`;
+
+      if (isWindows) {
+        // 确保 ComSpec 正确设置，防止 spawn shell:true 时找不到 cmd.exe
+        if (!env.ComSpec || !env.ComSpec.includes('\\')) {
+          const sysRoot = env.SystemRoot || env.WINDIR || 'C:\\Windows';
+          env.ComSpec = sysRoot + '\\System32\\cmd.exe';
+        }
+
+        // 查找 Git Bash 路径，不硬编码
+        if (!env.CLAUDE_CODE_GIT_BASH_PATH) {
+          const candidates = [
+            env['ProgramFiles'] && env['ProgramFiles'] + '\\Git\\bin\\bash.exe',
+            'C:\\Program Files\\Git\\bin\\bash.exe',
+            'D:\\Program Files\\Git\\bin\\bash.exe',
+          ].filter(Boolean) as string[];
+          for (const c of candidates) {
+            try {
+              accessSync(c);
+              env.CLAUDE_CODE_GIT_BASH_PATH = c;
+              break;
+            } catch { /* 不存在则继续 */ }
+          }
+        }
       }
       console.log('[sdk-runner] GIT_BASH=', JSON.stringify(env.CLAUDE_CODE_GIT_BASH_PATH));
+      console.log('[sdk-runner] ComSpec=', JSON.stringify(env.ComSpec));
       const claudeBin = resolveClaudeBin();
       console.log('[sdk-runner] claude bin:', claudeBin);
       console.log('[sdk-runner] args:', args.join(' '));
@@ -89,7 +112,7 @@ export class SessionRunner {
         cwd: projectPath,
         env,
         stdio: ['pipe', 'pipe', 'pipe'],
-        shell: claudeBin.endsWith('.cmd'),
+        shell: isWindows ? env.ComSpec : undefined,
         windowsHide: true,
       });
     } catch (err) {
