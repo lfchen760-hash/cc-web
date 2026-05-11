@@ -12,7 +12,7 @@ sleep 2
 echo ""
 echo "[2/2] 启动本地服务..."
 cd "$SCRIPT_DIR/packages/local"
-setsid npx tsx --env-file=../../.env src/index.ts &
+nohup npx tsx --env-file=../../.env src/index.ts >/dev/null 2>&1 &
 disown
 
 echo ""
