@@ -23,13 +23,15 @@ npx vite build
 echo ""
 echo "[3/4] 启动中继服务 (端口 3001)..."
 cd "$SCRIPT_DIR/packages/relay"
-npx tsx --env-file=../../.env src/index.ts &
+setsid npx tsx --env-file=../../.env src/index.ts &
+disown
 sleep 1
 
 echo ""
 echo "[4/4] 启动前端开发服务 (端口 5173)..."
 cd "$SCRIPT_DIR/packages/frontend"
-npx vite --host 0.0.0.0 --port 5173 &
+setsid npx vite --host 0.0.0.0 --port 5173 &
+disown
 
 echo ""
 echo "=== 云服务启动完成 ==="
