@@ -34,6 +34,17 @@ onMessage((msg) => {
   switch (msg.type) {
     case 'registered':
       console.log('已在服务中注册');
+      // 重连后同步当前状态到前端
+      {
+        const sessions = listSessions();
+        const sessionsWithHistory = sessions.map((s) => ({
+          ...s,
+          messages: getHistory(s.sessionId) || [],
+        }));
+        send({ type: 'sessions_list', sessions: sessionsWithHistory });
+        const projects = listProjects();
+        send({ type: 'projects_list', projects });
+      }
       break;
 
     case 'chat': {

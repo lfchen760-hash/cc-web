@@ -65,8 +65,7 @@ function connect(): void {
   ws.on('close', () => {
     console.log('与中转服务的连接已断开');
     ws = null;
-    // 临时关闭重连排查问题
-    // scheduleReconnect();
+    scheduleReconnect();
   });
 
   ws.on('error', (err) => {

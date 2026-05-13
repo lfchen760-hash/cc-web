@@ -513,6 +513,7 @@ export function handleBrowserConnection(ws: WebSocket): void {
 
   ws.on('close', () => {
     console.log('浏览器客户端已断开');
+    clearInterval(heartbeat);
     allBrowsers.delete(ws);
     browserNodeMap.delete(ws);
     authenticatedBrowsers.delete(ws);
@@ -522,6 +523,15 @@ export function handleBrowserConnection(ws: WebSocket): void {
   });
 
   ws.on('error', () => {});
+
+  // 心跳保活（协议级 ping，浏览器自动响应 pong）
+  const heartbeat = setInterval(() => {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.ping();
+    } else {
+      clearInterval(heartbeat);
+    }
+  }, 30000);
 }
 
 export function handleLocalConnection(ws: WebSocket): void {
@@ -541,6 +551,7 @@ export function handleLocalConnection(ws: WebSocket): void {
   });
 
   ws.on('close', () => {
+    clearInterval(heartbeat);
     const nodeId = (ws as unknown as Record<string, unknown>)._nodeId as string | undefined;
     if (nodeId && nodeId !== 'pending' && localNodes.get(nodeId)?.ws === ws) {
       localNodes.delete(nodeId);
