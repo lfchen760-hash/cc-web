@@ -3,9 +3,15 @@ import { RELAY_URL, RELAY_TOKEN, NODE_ID, NODE_PASSWORD, RECONNECT_DELAY, MAX_RE
 
 type MessageHandler = (msg: { type: string; [key: string]: unknown }) => void;
 
+const READY_STATE_LABEL: Record<number, string> = {
+  0: 'CONNECTING', 1: 'OPEN', 2: 'CLOSING', 3: 'CLOSED',
+};
+
 let ws: WebSocket | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let currentDelay = RECONNECT_DELAY;
+let reconnectAttempt = 0;       // 重连次数计数器
+let connectTime: Date | null = null;  // 本次连接建立时间
 let handlers: MessageHandler[] = [];
 
 export function onMessage(handler: MessageHandler): void {
@@ -25,21 +31,25 @@ export function isConnected(): boolean {
 }
 
 function connect(): void {
-  // 关闭已有连接再建新连接，避免在 relay 端创建多个连接互相替换
   if (ws) {
+    const oldState = READY_STATE_LABEL[ws.readyState] || ws.readyState;
+    console.log(`[ws-client] 关闭旧连接 (readyState=${oldState}) 后重新连接`);
     ws.onclose = null;
     ws.onerror = null;
     ws.close();
     ws = null;
   }
 
-  console.log(`正在连接中转服务: ${RELAY_URL}`);
+  reconnectAttempt++;
+  console.log(`[ws-client] 第 ${reconnectAttempt} 次连接尝试 → ${RELAY_URL}`);
 
   ws = new WebSocket(RELAY_URL);
 
   ws.on('open', () => {
-    console.log('已连接到中转服务');
+    connectTime = new Date();
+    console.log('[ws-client] 已连接到中转服务');
     currentDelay = RECONNECT_DELAY;
+    reconnectAttempt = 0;  // 连接成功后重置重连计数
 
     // 注册
     send({ type: 'register', nodeId: NODE_ID, token: RELAY_TOKEN, passwordRequired: !!NODE_PASSWORD });
@@ -48,12 +58,10 @@ function connect(): void {
   ws.on('message', (raw) => {
     try {
       const msg = JSON.parse(raw.toString());
-      // 忽略心跳 ping
       if (msg.type === 'ping') {
         send({ type: 'pong' });
         return;
       }
-      // 通知所有处理器
       for (const handler of handlers) {
         handler(msg);
       }
@@ -62,23 +70,34 @@ function connect(): void {
     }
   });
 
-  ws.on('close', () => {
-    console.log('与中转服务的连接已断开');
+  ws.on('close', (code, reason) => {
+    const duration = connectTime ? `${Math.round((Date.now() - connectTime.getTime()) / 1000)}s` : '未知';
+    const reasonStr = reason ? reason.toString('utf-8').substring(0, 100) : '(无)';
+    console.log(`[ws-client] 连接已断开 | 本次持续: ${duration} | closeCode: ${code} | reason: ${reasonStr}`);
     ws = null;
+    connectTime = null;
     scheduleReconnect();
   });
 
   ws.on('error', (err) => {
-    console.error('WebSocket 错误:', err.message);
+    const label = READY_STATE_LABEL[ws?.readyState ?? -1] || 'unknown';
+    console.error(`[ws-client] 连接错误 | ${err.message} | readyState=${label}`);
+    // 兜底：某些异常场景下 error 后可能不触发 close，确保重连
+    scheduleReconnect();
   });
 }
 
 function scheduleReconnect(): void {
-  if (reconnectTimer) return;
-  console.log(`${currentDelay / 1000}s 后重连...`);
+  if (reconnectTimer) {
+    console.log(`[ws-client] 已有重连定时器等待中，跳过重复调度`);
+    return;
+  }
+  console.log(`[ws-client] ${currentDelay / 1000}s 后开始第 ${reconnectAttempt + 1} 次重连...`);
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
+    const prevDelay = currentDelay;
     currentDelay = Math.min(currentDelay * 2, MAX_RECONNECT_DELAY);
+    console.log(`[ws-client] 重连定时器触发 (上次延迟 ${prevDelay / 1000}s, 下次延迟 ${currentDelay / 1000}s)`);
     connect();
   }, currentDelay);
 }

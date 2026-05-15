@@ -1,3 +1,16 @@
+// 全局时间戳——所有 console 输出前自动加上时间，方便定位问题发生时刻
+const _log = console.log.bind(console);
+const _error = console.error.bind(console);
+const _warn = console.warn.bind(console);
+function ts(): string {
+  const now = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+}
+console.log = (...args: unknown[]) => _log(`[${ts()}]`, ...args);
+console.error = (...args: unknown[]) => _error(`[${ts()}]`, ...args);
+console.warn = (...args: unknown[]) => _warn(`[${ts()}]`, ...args);
+
 import { start, onMessage, send } from './ws-client.js';
 import { NODE_PASSWORD, NODE_ID, FORCE_PERMISSION_MODE } from './config.js';
 import {
