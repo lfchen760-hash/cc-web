@@ -85,6 +85,7 @@ export function ChatView() {
   const [authenticatedNodes, setAuthenticatedNodes] = useState<Set<string>>(new Set());
   const [pendingAuthNodeId, setPendingAuthNodeId] = useState<string | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [autoAuthInProgress, setAutoAuthInProgress] = useState(false);
   const [gitStatuses, setGitStatuses] = useState<Map<string, GitStatusResult>>(new Map());
   const [diffState, setDiffState] = useState<{ filePath: string; projectPath: string; staged: boolean; diff: string } | null>(null);
   const [fileTrees, setFileTrees] = useState<Map<string, FileTreeNode[]>>(new Map());
@@ -103,6 +104,7 @@ export function ChatView() {
   const pendingSessionRef = useRef<string | null>(null);
   const handleRawMessageRef = useRef<((raw: string) => void) | null>(null);
   const restoredRef = useRef(false);
+  const autoAuthTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const activeSessionIdRef = useRef(activeSessionId);
   activeSessionIdRef.current = activeSessionId;
 
@@ -124,6 +126,31 @@ export function ChatView() {
       const raw = localStorage.getItem(LAST_VIEW_KEY);
       return raw ? JSON.parse(raw) : null;
     } catch { return null; }
+  };
+
+  const NODE_PASSWORDS_KEY = "cc-web-node-passwords";
+  const loadNodePasswords = (): Record<string, string> => {
+    try {
+      const raw = localStorage.getItem(NODE_PASSWORDS_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch { return {}; }
+  };
+  const saveNodePassword = (nodeId: string, password: string) => {
+    try {
+      const passwords = loadNodePasswords();
+      passwords[nodeId] = password;
+      localStorage.setItem(NODE_PASSWORDS_KEY, JSON.stringify(passwords));
+    } catch {}
+  };
+  const removeNodePassword = (nodeId: string) => {
+    try {
+      const passwords = loadNodePasswords();
+      delete passwords[nodeId];
+      localStorage.setItem(NODE_PASSWORDS_KEY, JSON.stringify(passwords));
+    } catch {}
+  };
+  const loadNodePassword = (nodeId: string): string | null => {
+    return loadNodePasswords()[nodeId] || null;
   };
 
   // 初始加载节点列表和项目列表（通过 HTTP，可靠）
@@ -234,6 +261,79 @@ export function ChatView() {
     }
   }, [activeNodeId, activeProjectId, activeSessionId, sessions, projects]);
 
+  // 当节点需要认证且 WebSocket 已连接时，尝试用本地保存的密码自动认证
+  useEffect(() => {
+    if (pendingAuthNodeId && connected && !autoAuthInProgress && !authenticatedNodes.has(pendingAuthNodeId)) {
+      const savedPassword = loadNodePassword(pendingAuthNodeId);
+      if (savedPassword) {
+        if (autoAuthTimeoutRef.current) clearTimeout(autoAuthTimeoutRef.current);
+        setAutoAuthInProgress(true);
+        setAuthError(null);
+        send({ type: 'auth_node', nodeId: pendingAuthNodeId, password: savedPassword });
+        autoAuthTimeoutRef.current = setTimeout(() => {
+          setAutoAuthInProgress(false);
+          autoAuthTimeoutRef.current = null;
+        }, 5000);
+      }
+    }
+    return () => {
+      if (autoAuthTimeoutRef.current) {
+        clearTimeout(autoAuthTimeoutRef.current);
+        autoAuthTimeoutRef.current = null;
+      }
+    };
+  }, [pendingAuthNodeId, connected, autoAuthInProgress, send, authenticatedNodes]);
+
+  // 节点认证成功后加载项目和会话（仅当 HTTP 未返回数据时通过 WS 补充加载）
+  // 不用 loadedNodesRef 防重 —— 因为 send() 在 WS 未 OPEN 时会静默丢弃，
+  // 如果首次被丢弃，后续重连必须能重新请求。用 projects/sessions 是否为空来判断是否需要加载。
+  const projectsRef = useRef(projects);
+  projectsRef.current = projects;
+  const sessionsRef = useRef(sessions);
+  sessionsRef.current = sessions;
+  const loadRetryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const loadRetryCountRef = useRef(0);
+
+  useEffect(() => {
+    if (activeNodeId && authenticatedNodes.has(activeNodeId) && connected) {
+      // 确保 pendingSessionRef 已设置（初始加载自动认证时）
+      if (!pendingSessionRef.current) {
+        const saved = loadLastView();
+        if (saved?.sessionId && saved.nodeId === activeNodeId) {
+          pendingSessionRef.current = saved.sessionId;
+        }
+      }
+
+      const needProjects = projectsRef.current.length === 0;
+      const needSessions = sessionsRef.current.length === 0;
+
+      if (needProjects || needSessions) {
+        if (needProjects) send({ type: "list_projects", nodeId: activeNodeId });
+        if (needSessions) send({ type: "list_sessions", nodeId: activeNodeId });
+
+        // 2 秒后如果数据还没到就重试，最多 3 次
+        loadRetryCountRef.current = 0;
+        const doRetry = () => {
+          if (loadRetryCountRef.current >= 3) return;
+          const stillNeedProjects = projectsRef.current.length === 0;
+          const stillNeedSessions = sessionsRef.current.length === 0;
+          if (!stillNeedProjects && !stillNeedSessions) return;
+          loadRetryCountRef.current++;
+          if (stillNeedProjects) send({ type: "list_projects", nodeId: activeNodeId });
+          if (stillNeedSessions) send({ type: "list_sessions", nodeId: activeNodeId });
+          loadRetryRef.current = setTimeout(doRetry, 2000);
+        };
+        loadRetryRef.current = setTimeout(doRetry, 2000);
+      }
+    }
+    return () => {
+      if (loadRetryRef.current) {
+        clearTimeout(loadRetryRef.current);
+        loadRetryRef.current = null;
+      }
+    };
+  }, [activeNodeId, authenticatedNodes, connected, send]);
+
   // 处理一条 WebSocket 原始消息
   const handleRawMessage = useCallback(
     (raw: string) => {
@@ -267,10 +367,25 @@ export function ChatView() {
               });
               setPendingAuthNodeId(null);
               setAuthError(null);
-              // 通过 WebSocket 加载项目和会话
-              send({ type: "list_projects", nodeId: resultNodeId });
-              send({ type: "list_sessions", nodeId: resultNodeId });
+              setAutoAuthInProgress(false);
+              if (autoAuthTimeoutRef.current) {
+                clearTimeout(autoAuthTimeoutRef.current);
+                autoAuthTimeoutRef.current = null;
+              }
+              // 确保 pendingSessionRef 已设置（初始加载自动认证时）
+              if (!pendingSessionRef.current) {
+                const saved = loadLastView();
+                if (saved?.sessionId && saved.nodeId === resultNodeId) {
+                  pendingSessionRef.current = saved.sessionId;
+                }
+              }
             } else {
+              removeNodePassword(resultNodeId);
+              setAutoAuthInProgress(false);
+              if (autoAuthTimeoutRef.current) {
+                clearTimeout(autoAuthTimeoutRef.current);
+                autoAuthTimeoutRef.current = null;
+              }
               setAuthError((data.error as string) || "认证失败");
             }
             continue;
@@ -544,6 +659,26 @@ export function ChatView() {
     });
   }, [onRawMessage]);
 
+  const tryAutoAuth = useCallback(
+    (nodeId: string): boolean => {
+      const savedPassword = loadNodePassword(nodeId);
+      if (savedPassword && connected) {
+        if (autoAuthTimeoutRef.current) clearTimeout(autoAuthTimeoutRef.current);
+        setAutoAuthInProgress(true);
+        setPendingAuthNodeId(nodeId);
+        setAuthError(null);
+        send({ type: 'auth_node', nodeId, password: savedPassword });
+        autoAuthTimeoutRef.current = setTimeout(() => {
+          setAutoAuthInProgress(false);
+          autoAuthTimeoutRef.current = null;
+        }, 5000);
+        return true;
+      }
+      return false;
+    },
+    [connected, send],
+  );
+
   const handleSelectNode = useCallback(
     (nodeId: string) => {
       setActiveNodeId(nodeId);
@@ -559,11 +694,14 @@ export function ChatView() {
       setPermissionDenials(null);
       setTaskProgress(null);
       setAuthError(null);
+      setAutoAuthInProgress(false);
 
       const node = nodes.find((n) => n.nodeId === nodeId);
 
       if (node?.passwordRequired && !authenticatedNodes.has(nodeId)) {
-        setPendingAuthNodeId(nodeId);
+        if (!tryAutoAuth(nodeId)) {
+          setPendingAuthNodeId(nodeId);
+        }
         return;
       }
 
@@ -592,12 +730,13 @@ export function ChatView() {
         })
         .catch(() => {});
     },
-    [nodes, authenticatedNodes],
+    [nodes, authenticatedNodes, tryAutoAuth],
   );
 
   const handleAuthNode = useCallback(
     (nodeId: string, password: string) => {
       setAuthError(null);
+      saveNodePassword(nodeId, password);
       send({ type: 'auth_node', nodeId, password });
     },
     [send],
@@ -657,6 +796,7 @@ export function ChatView() {
   const handleSelectProject = useCallback(
     (projectId: string) => {
       setActiveProjectId(projectId);
+      send({ type: "list_projects", nodeId: activeNodeId || undefined });
       send({ type: "list_sessions", projectId, nodeId: activeNodeId || undefined });
     },
     [send, activeNodeId],
@@ -940,7 +1080,7 @@ export function ChatView() {
             </span>
           )}
         </div>
-        {pendingAuthNodeId && (
+        {pendingAuthNodeId && !autoAuthInProgress && (
           <div className="flex items-center justify-center py-4 px-2 flex-shrink-0">
             <div className="bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-lg p-4 w-full max-w-sm shadow-lg">
               <div className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-3">
@@ -977,6 +1117,11 @@ export function ChatView() {
                     onClick={() => {
                       setPendingAuthNodeId(null);
                       setAuthError(null);
+                      setAutoAuthInProgress(false);
+                      if (autoAuthTimeoutRef.current) {
+                        clearTimeout(autoAuthTimeoutRef.current);
+                        autoAuthTimeoutRef.current = null;
+                      }
                     }}
                     className="px-3 py-1.5 text-sm border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-400 rounded-md hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
                   >

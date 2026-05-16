@@ -13,6 +13,7 @@ export function useWebSocket(): UseWebSocketReturn {
   const reconnectDelay = useRef(2000);
   const mounted = useRef(true);
   const rawMessageCb = useRef<((raw: string) => void) | null>(null);
+  const pendingQueue = useRef<unknown[]>([]);
 
   const [connected, setConnected] = useState(false);
 
@@ -30,6 +31,14 @@ export function useWebSocket(): UseWebSocketReturn {
       if (!mounted.current) return;
       setConnected(true);
       reconnectDelay.current = 2000;
+      // 发送积压在队列中的消息
+      const queue = pendingQueue.current;
+      pendingQueue.current = [];
+      for (const msg of queue) {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify(msg));
+        }
+      }
     };
 
     ws.onmessage = (event) => {
@@ -61,6 +70,11 @@ export function useWebSocket(): UseWebSocketReturn {
   const send = useCallback((data: unknown) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify(data));
+    } else {
+      // 未连接时入队，重连后自动发送（最多保留 20 条防止内存泄漏）
+      if (pendingQueue.current.length < 20) {
+        pendingQueue.current.push(data);
+      }
     }
   }, []);
 
@@ -79,6 +93,7 @@ export function useWebSocket(): UseWebSocketReturn {
         }
         wsRef.current = null;
       }
+      pendingQueue.current = [];
     };
   }, [connect]);
 
