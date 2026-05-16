@@ -1037,7 +1037,7 @@ export function ChatView() {
       />
       <div className="flex-1 flex flex-col min-w-0">
         {/* Toggle button bar */}
-        <div className="flex items-center gap-2 px-2 py-1 flex-shrink-0">
+        <div className="flex items-center gap-2 px-2 py-1 flex-shrink-0 sticky top-0 z-10 bg-white/90 dark:bg-slate-900/90 backdrop-blur-sm">
           <button
             onClick={() => setSidebarOpen((v) => !v)}
             className={`p-1.5 rounded-md transition-colors text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 ${
