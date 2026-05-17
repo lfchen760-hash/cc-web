@@ -317,6 +317,60 @@ export function updatePermissionMode(sessionId: string, mode: string): void {
   }
 }
 
+/** 即时切换会话权限模式：关闭当前 runner，用 --resume 重建上下文。
+ *  如果会话正在运行，则重发最后一条用户消息（相当于以新模式重试当前请求）。 */
+export function switchPermissionMode(sessionId: string, mode: string): boolean {
+  const session = sessions.get(sessionId);
+  if (!session) return false;
+
+  const oldMode = session.permissionMode;
+  session.permissionMode = mode;
+
+  if (session.runner) {
+    session.runner.close();
+    session.runner = null;
+  }
+
+  const wasRunning = session.status === 'running';
+  session.status = 'idle';
+
+  // 如果有 claudeSessionId，用 --resume 立即重建上下文
+  if (session.claudeSessionId) {
+    const runner = createRunner(session);
+    runner.start();
+    session.runner = runner;
+
+    if (wasRunning && session.lastUserText) {
+      session.status = 'running';
+      db.updateSessionStatus(sessionId, 'running');
+      runner.send(session.lastUserText);
+    }
+  }
+
+  if (session.status === 'idle') {
+    db.updateSessionStatus(sessionId, 'idle');
+  }
+
+  // 通知前端模式已切换
+  if (isConnected()) {
+    send({
+      type: 'session_info',
+      sessionId,
+      projectId: session.projectId,
+      projectPath: session.projectPath,
+      model: session.model,
+      permissionMode: mode,
+      summary: session.summary,
+      status: session.status,
+      messageCount: session.messages.length,
+      createdAt: session.createdAt,
+    });
+  }
+
+  console.log(`[session] 权限模式切换: ${sessionId.substring(0, 8)} ${oldMode || '(none)'} → ${mode}${wasRunning ? ' (重试当前消息)' : ''}`);
+  return true;
+}
+
 /** 权限批准后重试：移除被拒回复，用新权限模式重启 CLI 并重放对话 */
 export function retryWithPermission(sessionId: string, permissionMode: string): boolean {
   const session = sessions.get(sessionId);

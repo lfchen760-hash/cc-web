@@ -35,6 +35,12 @@ const KNOWN_MODELS = [
   { id: "deepseek-v4-pro", name: "DeepSeek V4 Pro" },
 ];
 
+const PERMISSION_MODES = [
+  { mode: "default", label: "只读", shortLabel: "读" },
+  { mode: "acceptEdits", label: "读写", shortLabel: "写" },
+  { mode: "bypassPermissions", label: "全权限", shortLabel: "全" },
+] as const;
+
 function useIsMobile() {
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 640);
   useEffect(() => {
@@ -802,6 +808,21 @@ export function ChatView() {
     [send, activeNodeId],
   );
 
+  const handleSwitchPermissionMode = useCallback(
+    (newMode: string) => {
+      if (!activeSessionId) return;
+      if (newMode === permissionMode) return;
+      setPermissionMode(newMode);
+      send({
+        type: "change_permission_mode",
+        sessionId: activeSessionId,
+        permissionMode: newMode,
+        nodeId: activeNodeId || undefined,
+      });
+    },
+    [activeSessionId, send, activeNodeId, permissionMode],
+  );
+
   const handleSlashCommand = useCallback(
     (text: string) => {
       const parts = text.trim().split(/\s+/);
@@ -814,7 +835,7 @@ export function ChatView() {
         return;
       }
 
-      // /permission <mode> — 切换权限模式
+      // /permission <mode> — 即时切换权限模式
       if (cmd === "/permission" && arg) {
         const newMode = parts[1];
         const validModes = ["acceptEdits", "bypassPermissions", "default"];
@@ -828,11 +849,16 @@ export function ChatView() {
           setMessages((prev) => [...prev, errMsg]);
           return;
         }
-        setPermissionMode(newMode);
+        if (!activeSessionId) {
+          setPermissionMode(newMode);
+          return;
+        }
+        handleSwitchPermissionMode(newMode);
+        const modeLabel = PERMISSION_MODES.find(m => m.mode === newMode)?.label || newMode;
         const infoMsg: ChatMessage = {
           type: "chat",
           role: "assistant",
-          content: `权限模式已切换为: ${newMode}\n下次发送消息时生效。`,
+          content: `权限模式已切换为: ${modeLabel} (${newMode})`,
           timestamp: Date.now(),
         };
         setMessages((prev) => [...prev, infoMsg]);
@@ -841,18 +867,14 @@ export function ChatView() {
 
       // /permission（无参数）— 显示当前模式
       if (cmd === "/permission") {
-        const currentPerm = permissionMode || "acceptEdits（默认）";
-        const modes = [
-          { value: "acceptEdits", label: "自动批准文件编辑" },
-          { value: "bypassPermissions", label: "全部自动批准" },
-          { value: "default", label: "标准权限检查" },
-        ];
-        let content = `/permission — 当前模式: ${currentPerm}\n\n可切换模式:\n`;
-        for (const m of modes) {
-          const marker = permissionMode === m.value ? " *" : "  ";
-          content += `${marker} ${m.value} — ${m.label}\n`;
+        const currentMode = permissionMode || "acceptEdits";
+        const currentLabel = PERMISSION_MODES.find(m => m.mode === currentMode)?.label || currentMode;
+        let content = `/permission — 当前模式: ${currentLabel} (${currentMode})\n\n可切换模式:\n`;
+        for (const m of PERMISSION_MODES) {
+          const marker = permissionMode === m.mode ? " *" : "  ";
+          content += `${marker} ${m.label} — ${m.mode}\n`;
         }
-        content += `\n输入 /permission <模式名> 切换（下次消息生效）。`;
+        content += `\n输入 /permission <模式名> 即时切换，或点击顶部模式按钮。`;
         setMessages((prev) => [
           ...prev,
           { type: "chat", role: "assistant", content, timestamp: Date.now() } as ChatMessage,
@@ -871,7 +893,7 @@ export function ChatView() {
       send({ type: "chat", sessionId: activeSessionId || "", text, nodeId: activeNodeId || undefined });
       setIsLoading(true);
     },
-    [activeSessionId, send, activeNodeId],
+    [activeSessionId, send, activeNodeId, handleSwitchPermissionMode, permissionMode],
   );
 
   // 模型选择器回调：用户确认切换模型
@@ -1073,6 +1095,30 @@ export function ChatView() {
                 </option>
               ))}
             </select>
+          )}
+          {/* 会话模式切换器 */}
+          {activeSessionId && (
+            <div className="flex items-center rounded-md border border-slate-300 dark:border-slate-600 overflow-hidden flex-shrink-0">
+              {PERMISSION_MODES.map((pm) => {
+                const active = (permissionMode || "acceptEdits") === pm.mode;
+                return (
+                  <button
+                    key={pm.mode}
+                    onClick={() => handleSwitchPermissionMode(pm.mode)}
+                    disabled={active}
+                    title={pm.mode === "default" ? "只读：所有操作需确认" : pm.mode === "acceptEdits" ? "读写：自动批准文件编辑" : "全权限：全部自动批准"}
+                    className={`text-xs px-2 py-0.5 transition-colors ${
+                      active
+                        ? "bg-blue-600 text-white cursor-default"
+                        : "text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700"
+                    }`}
+                  >
+                    <span className="hidden sm:inline">{pm.label}</span>
+                    <span className="sm:hidden">{pm.shortLabel}</span>
+                  </button>
+                );
+              })}
+            </div>
           )}
           {isMobile && (
             <span className="text-xs text-slate-500 dark:text-slate-400">

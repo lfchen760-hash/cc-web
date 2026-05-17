@@ -19,6 +19,7 @@ import {
   stopSession,
   retryWithPermission,
   updatePermissionMode,
+  switchPermissionMode,
   listSessions,
   getSession,
   getHistory,
@@ -143,6 +144,13 @@ onMessage((msg) => {
       send({ type: 'session_info', ...info });
       const projects = listProjects();
       send({ type: 'projects_list', projects });
+      break;
+    }
+
+    case 'change_permission_mode': {
+      const sid = msg.sessionId as string;
+      const permMode = FORCE_PERMISSION_MODE || (msg.permissionMode as string);
+      if (sid && permMode) switchPermissionMode(sid, permMode);
       break;
     }
 

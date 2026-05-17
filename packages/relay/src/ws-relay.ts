@@ -276,6 +276,22 @@ function handleBrowserMessage(ws: WebSocket, msg: BrowserMessage): void {
       return;
     }
 
+    case 'change_permission_mode': {
+      const nid = msg.sessionId ? sessionNodeMap.get(msg.sessionId) : null;
+      const targetNode = nid || getNodeIdForBrowser(ws);
+      if (targetNode && msg.sessionId) {
+        const node = localNodes.get(targetNode);
+        if (node) {
+          if (!isAuthenticated(ws, targetNode)) {
+            send(ws, { type: 'error', error: `节点 ${targetNode} 需要密码认证` });
+            return;
+          }
+          send(node.ws, { type: 'change_permission_mode', sessionId: msg.sessionId, permissionMode: msg.permissionMode });
+        }
+      }
+      break;
+    }
+
     case 'retry_with_permission': {
       const nid = msg.sessionId ? sessionNodeMap.get(msg.sessionId) : null;
       const targetNode = nid || getNodeIdForBrowser(ws);

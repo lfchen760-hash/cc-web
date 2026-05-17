@@ -315,6 +315,13 @@ export interface WSListNodesMessage {
   type: "list_nodes";
 }
 
+export interface WSChangePermissionModeMessage {
+  type: "change_permission_mode";
+  sessionId: string;
+  permissionMode: string;
+  nodeId?: string;
+}
+
 export interface WSRetryWithPermissionMessage {
   type: "retry_with_permission";
   sessionId: string;
@@ -364,6 +371,7 @@ export type WSBrowserMessage =
   | WSListNodesMessage
   | WSAuthNodeMessage
   | WSRetryWithPermissionMessage
+  | WSChangePermissionModeMessage
   | WSGetGitStatusMessage
   | WSGetGitDiffMessage
   | WSGetFileTreeMessage
