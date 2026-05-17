@@ -419,20 +419,25 @@ function handleLocalMessage(ws: WebSocket, msg: LocalMessage): void {
   switch (msg.type) {
     case 'register': {
       if (msg.token !== RELAY_TOKEN) {
+        const ip = (ws as unknown as Record<string, unknown>)._ip as string || '?';
+        console.warn(`[relay] 节点注册认证失败: token 不匹配 | IP: ${ip} | 声称 nodeId: ${msg.nodeId || 'unknown'}`);
         send(ws, { type: 'error', error: '认证失败：token 不匹配' });
         ws.close();
         return;
       }
       const nodeId = msg.nodeId || 'unknown';
+      const ip = (ws as unknown as Record<string, unknown>)._ip as string || '?';
       // 同 nodeId 重连：替换旧连接
       if (localNodes.has(nodeId)) {
-        console.log(`节点 ${nodeId} 重连，替换旧连接`);
+        const oldStart = (localNodes.get(nodeId)!.ws as unknown as Record<string, unknown>)._connectedAt as number;
+        const oldDuration = oldStart ? `${((Date.now() - oldStart) / 1000).toFixed(1)}s` : '?';
+        console.log(`[relay] 节点 ${nodeId} 重连，替换旧连接 | IP: ${ip} | 旧连接持续: ${oldDuration}`);
         localNodes.get(nodeId)!.ws.close();
       }
       localNodes.set(nodeId, { ws, nodeId, passwordRequired: msg.passwordRequired === true });
       // 存储 nodeId 到 ws 上供 disconnect 时查找
       (ws as unknown as Record<string, unknown>)._nodeId = nodeId;
-      console.log(`节点已注册: ${nodeId} (在线节点数: ${localNodes.size})`);
+      console.log(`[relay] 节点已注册: ${nodeId} | IP: ${ip} | 需密码: ${msg.passwordRequired === true} | 在线节点: ${localNodes.size}`);
       send(ws, { type: 'registered' });
       broadcastNodesList();
       break;
@@ -470,7 +475,8 @@ function handleLocalMessage(ws: WebSocket, msg: LocalMessage): void {
           broadcastToAllBrowsers({ ...msg, nodeId });
         }
       } else {
-        console.log('[relay] ⚠️ 缺少 sessionId，无法转发:', msg.type);
+        const nodeId = (ws as unknown as Record<string, unknown>)._nodeId as string;
+        console.warn(`[relay] 缺少 sessionId，无法转发: ${msg.type} | 来源节点: ${nodeId}`);
       }
       break;
     }
@@ -491,10 +497,12 @@ function handleLocalMessage(ws: WebSocket, msg: LocalMessage): void {
 
 // ---- 连接管理 ----
 
-export function handleBrowserConnection(ws: WebSocket): void {
-  console.log('浏览器客户端已连接');
+export function handleBrowserConnection(ws: WebSocket, ip: string): void {
+  (ws as unknown as Record<string, unknown>)._connectedAt = Date.now();
+  (ws as unknown as Record<string, unknown>)._ip = ip;
   allBrowsers.add(ws);
   browserNodeMap.delete(ws);
+  console.log(`[relay] 浏览器已连接 | IP: ${ip} | 在线: ${allBrowsers.size}`);
 
   // 通知当前节点列表
   const nodes = getOnlineNodes();
@@ -507,22 +515,26 @@ export function handleBrowserConnection(ws: WebSocket): void {
       const msg = JSON.parse(raw.toString());
       handleBrowserMessage(ws, msg as BrowserMessage);
     } catch {
-      // 忽略解析失败
+      console.warn(`[relay] 浏览器消息解析失败 | IP: ${ip}`);
     }
   });
 
-  ws.on('close', () => {
-    console.log('浏览器客户端已断开');
+  ws.on('close', (code) => {
     clearInterval(heartbeat);
+    const start = (ws as unknown as Record<string, unknown>)._connectedAt as number;
+    const duration = start ? `${((Date.now() - start) / 1000).toFixed(1)}s` : '?';
     allBrowsers.delete(ws);
     browserNodeMap.delete(ws);
     authenticatedBrowsers.delete(ws);
     for (const [, clients] of browserSessions) {
       clients.delete(ws);
     }
+    console.log(`[relay] 浏览器已断开 | IP: ${ip} | 持续: ${duration} | closeCode: ${code} | 在线: ${allBrowsers.size}`);
   });
 
-  ws.on('error', () => {});
+  ws.on('error', (err) => {
+    console.error(`[relay] 浏览器连接错误 | IP: ${ip} | ${err.message}`);
+  });
 
   // 心跳保活（协议级 ping，浏览器自动响应 pong）
   const heartbeat = setInterval(() => {
@@ -534,8 +546,10 @@ export function handleBrowserConnection(ws: WebSocket): void {
   }, 30000);
 }
 
-export function handleLocalConnection(ws: WebSocket): void {
-  console.log('本地服务连接请求');
+export function handleLocalConnection(ws: WebSocket, ip: string): void {
+  (ws as unknown as Record<string, unknown>)._connectedAt = Date.now();
+  (ws as unknown as Record<string, unknown>)._ip = ip;
+  console.log(`[relay] 本地服务连接请求 | IP: ${ip}`);
 
   // 暂时存储连接，等 register 消息到达后才知道 nodeId
   // 先设置一个临时 nodeId，register 时会设置正确的
@@ -546,16 +560,19 @@ export function handleLocalConnection(ws: WebSocket): void {
       const msg = JSON.parse(raw.toString());
       handleLocalMessage(ws, msg as LocalMessage);
     } catch {
-      // 忽略解析失败
+      console.warn(`[relay] 本地消息解析失败 | IP: ${ip}`);
     }
   });
 
-  ws.on('close', () => {
+  ws.on('close', (code, reason) => {
     clearInterval(heartbeat);
+    const start = (ws as unknown as Record<string, unknown>)._connectedAt as number;
+    const duration = start ? `${((Date.now() - start) / 1000).toFixed(1)}s` : '?';
+    const reasonStr = reason ? Buffer.from(reason).toString('utf-8').substring(0, 100) : '(无)';
     const nodeId = (ws as unknown as Record<string, unknown>)._nodeId as string | undefined;
     if (nodeId && nodeId !== 'pending' && localNodes.get(nodeId)?.ws === ws) {
       localNodes.delete(nodeId);
-      console.log(`节点已断开: ${nodeId} (在线节点数: ${localNodes.size})`);
+      console.log(`[relay] 节点已断开: ${nodeId} | IP: ${ip} | 持续: ${duration} | closeCode: ${code} | reason: ${reasonStr} | 在线节点: ${localNodes.size}`);
 
       // 清理该节点的会话映射
       for (const [sid, nid] of sessionNodeMap) {
@@ -569,7 +586,9 @@ export function handleLocalConnection(ws: WebSocket): void {
     }
   });
 
-  ws.on('error', () => {});
+  ws.on('error', (err) => {
+    console.error(`[relay] 本地连接错误 | IP: ${ip} | ${err.message}`);
+  });
 
   // 心跳
   const heartbeat = setInterval(() => {

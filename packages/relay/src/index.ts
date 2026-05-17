@@ -1,3 +1,16 @@
+// 全局时间戳——所有 console 输出前自动加上时间，方便定位问题发生时刻
+const _log = console.log.bind(console);
+const _error = console.error.bind(console);
+const _warn = console.warn.bind(console);
+function ts(): string {
+  const now = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+}
+console.log = (...args: unknown[]) => _log(`[${ts()}]`, ...args);
+console.error = (...args: unknown[]) => _error(`[${ts()}]`, ...args);
+console.warn = (...args: unknown[]) => _warn(`[${ts()}]`, ...args);
+
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -10,6 +23,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const staticDir = path.resolve(__dirname, STATIC_DIR);
 
 function jsonResponse(res: http.ServerResponse, data: unknown, status = 200): void {
+  if (status >= 400) {
+    console.warn(`HTTP ${status}: ${(data as { error?: string })?.error || 'unknown'}`);
+  }
   res.writeHead(status, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
   res.end(JSON.stringify(data));
 }
@@ -74,14 +90,23 @@ const browserWss = new WebSocketServer({ noServer: true });
 // WebSocket: 本地服务连接 → /ws/local
 const localWss = new WebSocketServer({ noServer: true });
 
+function getClientIp(req: http.IncomingMessage): string {
+  const forwarded = req.headers['x-forwarded-for'] as string | undefined;
+  if (forwarded) return forwarded.split(',')[0].trim();
+  const raw = req.socket.remoteAddress || 'unknown';
+  // 去掉 IPv4-mapped IPv6 前缀
+  return raw.replace(/^::ffff:/i, '');
+}
+
 server.on('upgrade', (req, socket, head) => {
+  const ip = getClientIp(req);
   if (req.url === '/ws/browser') {
     browserWss.handleUpgrade(req, socket, head, (ws) => {
-      handleBrowserConnection(ws);
+      handleBrowserConnection(ws, ip);
     });
   } else if (req.url === '/ws/local') {
     localWss.handleUpgrade(req, socket, head, (ws) => {
-      handleLocalConnection(ws);
+      handleLocalConnection(ws, ip);
     });
   } else {
     socket.destroy();
